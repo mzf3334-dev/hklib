@@ -21,21 +21,57 @@ An automated Python script that helps users manage their Hong Kong Public Librar
 Built using:
 - Selenium WebDriver for browser automation
 - Python datetime for date handling
-- Configuration file for credentials management
+- Environment variables for credentials management
 
 ## Configuration Setup
-1. Copy `config.template.py` to `config.py`:
+The script uses environment variables for configuration. You can set these in your local environment or as GitHub Secrets.
+
+### Required Variables
+- `LIB_USERNAME`: Your library card number.
+- `LIB_PASSWORD`: Your library password.
+- `EMAIL_SENDER`: Your Gmail address.
+- `EMAIL_RECEIVER`: The recipient email address.
+- `GMAIL_PWD`: Your Gmail app password (Generate from Google Account settings).
+
+### Gmail Setup for `EMAIL_SENDER`
+To use a Gmail account as the sender, you must use an **App Password** because standard password login is disabled for security.
+1. Enable **2-Step Verification** in your [Google Account Security settings](https://myaccount.google.com/security).
+2. Search for "App Passwords" in the search bar or go to the [App Passwords page](https://myaccount.google.com/apppasswords).
+3. Create a new app password (e.g., name it "Library Renewal").
+4. Use the generated **16-character code** as your `GMAIL_PWD`.
+
+## Local Usage
+
+### Prerequisites
+- Python 3.10 or higher
+- Chrome Browser installed
+
+### Installation
+1. Install the required dependencies:
 ```bash
-cp config.template.py config.py
+pip install -r requirements.txt
 ```
 
-2. Edit `config.py` with your credentials:
-- Library card number and password
-- Gmail sender address
-- Recipient email address
-- Gmail app password (Generate from Google Account settings)
+### Running the Script
+1. Ensure you have completed the [Configuration Setup](#configuration-setup).
+2. Run the script:
+```bash
+python hk_library_renew.py
+```
 
-Note: Never commit `config.py` with your actual credentials to Git. The template file is provided as a reference only.
+## GitHub Actions Automation
+This project is configured to run automatically using GitHub Actions.
+
+### Setup Instructions
+1. Go to your GitHub repository.
+2. Navigate to **Settings** > **Secrets and variables** > **Actions**.
+3. Create the following **Repository secrets**:
+    - `LIB_USERNAME`: Your library card number.
+    - `LIB_PASSWORD`: Your library password.
+    - `EMAIL_SENDER`: Your Gmail address.
+    - `EMAIL_RECEIVER`: The recipient email address.
+    - `GMAIL_PWD`: Your Gmail App Password.
+4. The script is scheduled to run daily at 6 PM HKT. You can also trigger it manually from the **Actions** tab.
 
 ## Author
 Developed by Tony Mok

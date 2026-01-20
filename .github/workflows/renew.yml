@@ -1,0 +1,32 @@
+name: Renew Library Books
+
+on:
+  schedule:
+    - cron: '0 10 * * *' # 6 PM HKT (10 AM UTC)
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run renewal script
+        env:
+          LIB_USERNAME: ${{ secrets.LIB_USERNAME }}
+          LIB_PASSWORD: ${{ secrets.LIB_PASSWORD }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+          GMAIL_PWD: ${{ secrets.GMAIL_PWD }}
+        run: python hk_library_renew.py

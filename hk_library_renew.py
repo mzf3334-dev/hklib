@@ -2,15 +2,33 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
 from datetime import datetime, timedelta
 import time
-import config
+import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+def get_config(key, default=None):
+    """Get configuration from environment variable"""
+    return os.environ.get(key, default)
+
+# Configuration
+LIB_USERNAME = get_config("LIB_USERNAME")
+LIB_PASSWORD = get_config("LIB_PASSWORD")
+EMAIL_SENDER = get_config("EMAIL_SENDER")
+EMAIL_RECEIVER = get_config("EMAIL_RECEIVER")
+GMAIL_PWD = get_config("GMAIL_PWD")
+
 # Initialize the Chrome WebDriver
-driver = webdriver.Chrome()
+chrome_options = Options()
+if os.environ.get("GITHUB_ACTIONS"):
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+
+driver = webdriver.Chrome(options=chrome_options)
 wait = WebDriverWait(driver, 25)
 
 def parse_due_date(date_str):
@@ -28,9 +46,9 @@ def parse_due_date(date_str):
 
 def send_email(subject, body):
     """Send an email using Gmail SMTP"""
-    sender_email = config.EMAIL_SENDER
-    receiver_email = config.EMAIL_RECEIVER
-    password = config.GMAIL_PWD
+    sender_email = EMAIL_SENDER
+    receiver_email = EMAIL_RECEIVER
+    password = GMAIL_PWD
 
     message = MIMEMultipart()
     message["From"] = sender_email
@@ -58,8 +76,8 @@ try:
     username_field = wait.until(EC.presence_of_element_located((By.NAME, "USER")))
     password_field = wait.until(EC.presence_of_element_located((By.NAME, "PASSWORD")))
     
-    username_field.send_keys(config.LIB_USERNAME)
-    password_field.send_keys(config.LIB_PASSWORD)
+    username_field.send_keys(LIB_USERNAME)
+    password_field.send_keys(LIB_PASSWORD)
     password_field.submit()
     print("Step 2: Credentials submitted")
 
