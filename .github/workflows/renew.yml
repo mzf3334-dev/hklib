@@ -29,4 +29,9 @@ jobs:
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
           GMAIL_PWD: ${{ secrets.GMAIL_PWD }}
+          # Additional accounts (optional)
+          LIB_USERNAME2: ${{ secrets.LIB_USERNAME2 }}
+          LIB_PASSWORD2: ${{ secrets.LIB_PASSWORD2 }}
+          EMAIL_RECEIVER2: ${{ secrets.EMAIL_RECEIVER2 }}
+          
         run: python hk_library_renew.py

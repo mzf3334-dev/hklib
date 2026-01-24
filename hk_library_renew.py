@@ -14,22 +14,52 @@ def get_config(key, default=None):
     """Get configuration from environment variable"""
     return os.environ.get(key, default)
 
-# Configuration
-LIB_USERNAME = get_config("LIB_USERNAME")
-LIB_PASSWORD = get_config("LIB_PASSWORD")
+# Email Configuration
 EMAIL_SENDER = get_config("EMAIL_SENDER")
-EMAIL_RECEIVER = get_config("EMAIL_RECEIVER")
 GMAIL_PWD = get_config("GMAIL_PWD")
 
-# Initialize the Chrome WebDriver
-chrome_options = Options()
-if os.environ.get("GITHUB_ACTIONS"):
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
+def get_accounts():
+    """
+    Get library accounts from environment variables.
+    Supports multiple accounts: LIB_USERNAME, LIB_PASSWORD, EMAIL_RECEIVER
+    and LIB_USERNAME2, LIB_PASSWORD2, EMAIL_RECEIVER2, etc.
+    """
+    accounts = []
+    
+    # First account (no suffix)
+    username = get_config("LIB_USERNAME")
+    password = get_config("LIB_PASSWORD")
+    email_receiver = get_config("EMAIL_RECEIVER")
+    if username and password:
+        accounts.append({
+            "username": username,
+            "password": password,
+            "email_receiver": email_receiver
+        })
+    
+    # Check for additional accounts (2, 3, 4, ...)
+    for i in range(2, 10):  # Support up to 9 accounts
+        username = get_config(f"LIB_USERNAME{i}")
+        password = get_config(f"LIB_PASSWORD{i}")
+        email_receiver = get_config(f"EMAIL_RECEIVER{i}")
+        if username and password:
+            accounts.append({
+                "username": username,
+                "password": password,
+                "email_receiver": email_receiver
+            })
+    
+    return accounts
 
-driver = webdriver.Chrome(options=chrome_options)
-wait = WebDriverWait(driver, 25)
+def create_driver():
+    """Create and configure Chrome WebDriver"""
+    chrome_options = Options()
+    if os.environ.get("GITHUB_ACTIONS"):
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(options=chrome_options)
+    return driver
 
 def parse_due_date(date_str):
     """Parse different date formats from the library system"""
@@ -44,11 +74,14 @@ def parse_due_date(date_str):
     except Exception:
         return None
 
-def send_email(subject, body):
+def send_email(subject, body, receiver_email):
     """Send an email using Gmail SMTP"""
     sender_email = EMAIL_SENDER
-    receiver_email = EMAIL_RECEIVER
     password = GMAIL_PWD
+
+    if not receiver_email:
+        print("No email receiver configured, skipping email")
+        return
 
     message = MIMEMultipart()
     message["From"] = sender_email
@@ -63,168 +96,200 @@ def send_email(subject, body):
         server.login(sender_email, password)
         server.sendmail(sender_email, receiver_email, message.as_string())
         server.quit()
-        print("Email sent successfully")
+        print(f"Email sent successfully to {receiver_email}")
     except Exception as e:
         print(f"Failed to send email: {str(e)}")
 
-try:
-    # Step 1: Navigate to English login page
-    driver.get("https://www.hkpl.gov.hk/en/login.html")
-    print("Step 1: Login page loaded")
-
-    # Step 2: Enter credentials and submit
-    username_field = wait.until(EC.presence_of_element_located((By.NAME, "USER")))
-    password_field = wait.until(EC.presence_of_element_located((By.NAME, "PASSWORD")))
+def process_account(account):
+    """Process renewal for a single library account"""
+    username = account["username"]
+    password = account["password"]
+    email_receiver = account.get("email_receiver")
     
-    username_field.send_keys(LIB_USERNAME)
-    password_field.send_keys(LIB_PASSWORD)
-    password_field.submit()
-    print("Step 2: Credentials submitted")
-
-    # Step 3: Wait for index page and confirm login
-    wait.until(EC.url_contains("index.html"))
-    print("Step 3: Login successful - redirected to index page")
+    print(f"\n{'='*60}")
+    print(f"Processing account: {username}")
+    print(f"{'='*60}")
     
-    # Step 4: Handle popup and overlay
+    driver = create_driver()
+    wait = WebDriverWait(driver, 25)
+    
     try:
-        overlay = driver.find_element(By.ID, "isd-overlay")
-        driver.execute_script("arguments[0].remove();", overlay)
-        print("Step 4: Removed overlay with JavaScript")
-    except:
-        print("Step 4: No overlay found")
+        # Step 1: Navigate to English login page
+        driver.get("https://www.hkpl.gov.hk/en/login.html")
+        print(f"[{username}] Step 1: Login page loaded")
 
-    # Step 5: Get the current window handle (original tab)
-    original_window = driver.current_window_handle
-    print(f"Original window handle: {original_window}")
-    
-    # Step 6: Click the "Go" button which opens a new tab
-    go_link = wait.until(EC.presence_of_element_located(
-        (By.CSS_SELECTOR, "a.ac_logout_btn")
-    ))
-    go_link.click()
-    print("Step 5: Clicked Go button - new tab should open")
-    
-    # Step 7: Wait for the new tab to open and switch to it
-    WebDriverWait(driver, 10).until(EC.number_of_windows_to_be(2))
-    
-    for window_handle in driver.window_handles:
-        if window_handle != original_window:
-            driver.switch_to.window(window_handle)
-            print(f"Step 6: Switched to new window: {window_handle}")
-            break
-    
-    # Step 8: Wait for the account page to load in the new tab
-    wait.until(EC.url_contains("PatronAccountPage"))
-    print(f"Step 7: Account page loaded: {driver.current_url}")
-    
-    # Step 9: Extract borrowed books and identify near-due items
-    print("Step 8: Extracting borrowed books...")
-    
-    table = wait.until(EC.presence_of_element_located((By.ID, "checkout")))
-    print("Found checkout table")
-    
-    rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
-    today = datetime.now()
-    borrowed_books = []
-    near_due_books = []
-    
-    if rows:
-        print("\nYour Borrowed Books:")
-        print("=" * 50)
-        for row_index, row in enumerate(rows):
+        # Step 2: Enter credentials and submit
+        username_field = wait.until(EC.presence_of_element_located((By.NAME, "USER")))
+        password_field = wait.until(EC.presence_of_element_located((By.NAME, "PASSWORD")))
+        
+        username_field.send_keys(username)
+        password_field.send_keys(password)
+        password_field.submit()
+        print(f"[{username}] Step 2: Credentials submitted")
+
+        # Step 3: Wait for index page and confirm login
+        wait.until(EC.url_contains("index.html"))
+        print(f"[{username}] Step 3: Login successful - redirected to index page")
+        
+        # Step 4: Handle popup and overlay
+        try:
+            overlay = driver.find_element(By.ID, "isd-overlay")
+            driver.execute_script("arguments[0].remove();", overlay)
+            print(f"[{username}] Step 4: Removed overlay with JavaScript")
+        except:
+            print(f"[{username}] Step 4: No overlay found")
+
+        # Step 5: Get the current window handle (original tab)
+        original_window = driver.current_window_handle
+        print(f"[{username}] Original window handle: {original_window}")
+        
+        # Step 6: Click the "Go" button which opens a new tab
+        go_link = wait.until(EC.presence_of_element_located(
+            (By.CSS_SELECTOR, "a.ac_logout_btn")
+        ))
+        go_link.click()
+        print(f"[{username}] Step 5: Clicked Go button - new tab should open")
+        
+        # Step 7: Wait for the new tab to open and switch to it
+        WebDriverWait(driver, 10).until(EC.number_of_windows_to_be(2))
+        
+        for window_handle in driver.window_handles:
+            if window_handle != original_window:
+                driver.switch_to.window(window_handle)
+                print(f"[{username}] Step 6: Switched to new window: {window_handle}")
+                break
+        
+        # Step 8: Wait for the account page to load in the new tab
+        wait.until(EC.url_contains("PatronAccountPage"))
+        print(f"[{username}] Step 7: Account page loaded: {driver.current_url}")
+        
+        # Step 9: Extract borrowed books and identify near-due items
+        print(f"[{username}] Step 8: Extracting borrowed books...")
+        
+        table = wait.until(EC.presence_of_element_located((By.ID, "checkout")))
+        print(f"[{username}] Found checkout table")
+        
+        rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
+        today = datetime.now()
+        borrowed_books = []
+        near_due_books = []
+        
+        if rows:
+            print(f"\n[{username}] Your Borrowed Books:")
+            print("=" * 50)
+            for row_index, row in enumerate(rows):
+                cols = row.find_elements(By.TAG_NAME, "td")
+                if len(cols) >= 5:
+                    title = cols[1].text.strip()
+                    due_date_str = cols[4].text.strip()
+                    due_date = parse_due_date(due_date_str)
+                    if due_date:
+                        days_until_due = (due_date - today).days
+                        book = {
+                            'title': title,
+                            'due_date': due_date,
+                            'due_date_str': due_date_str,
+                            'row_index': row_index
+                        }
+                        borrowed_books.append(book)
+                        if 0 <= days_until_due < 5:
+                            print(f"Title: {title}")
+                            print(f"Due Date: {due_date_str} ({days_until_due} days remaining)")
+                            print("⚠️ Book is near due - will select for renewal")
+                            near_due_books.append(book)
+                            print("-" * 50)
+                    else:
+                        print(f"Title: {title}")
+                        print(f"Due Date: {due_date_str} (format not recognized)")
+                        print("-" * 50)
+            print(f"[{username}] Total books: {len(borrowed_books)}")
+            print(f"[{username}] Books near due: {len(near_due_books)}")
+        else:
+            print(f"[{username}] No borrowed books found")
+        
+        # Step 10: Select near-due books for renewal
+        if near_due_books:
+            print(f"\n[{username}] Selecting near-due books for renewal...")
+            for book in near_due_books:
+                row = rows[book['row_index']]
+                cols = row.find_elements(By.TAG_NAME, "td")
+                if cols:
+                    checkbox = cols[0].find_element(By.TAG_NAME, "input")
+                    if checkbox.get_attribute("type") == "checkbox" and not checkbox.is_selected():
+                        checkbox.click()
+                        print(f"[{username}] Selected: {book['title']}")
+            
+            # Step 11: Click the renew button and wait for processing
+            try:
+                renew_button = wait.until(EC.element_to_be_clickable((By.ID, "button.renew")))
+                renew_button.click()
+                print(f"[{username}] Clicked renew button")
+                time.sleep(5)  # Wait for renewal processing to complete
+                print(f"[{username}] Renewal processing completed")
+            except Exception as e:
+                print(f"[{username}] Error during renewal: {str(e)}")
+        else:
+            print(f"[{username}] No near-due books to renew")
+        
+        # Re-extract current books after renewal attempt
+        rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
+        current_books = {}
+        for row in rows:
             cols = row.find_elements(By.TAG_NAME, "td")
             if len(cols) >= 5:
                 title = cols[1].text.strip()
                 due_date_str = cols[4].text.strip()
                 due_date = parse_due_date(due_date_str)
                 if due_date:
-                    days_until_due = (due_date - today).days
-                    book = {
-                        'title': title,
-                        'due_date': due_date,
-                        'due_date_str': due_date_str,
-                        'row_index': row_index
-                    }
-                    borrowed_books.append(book)
-                    if 0 <= days_until_due < 5:
-                        print(f"Title: {title}")
-                        print(f"Due Date: {due_date_str} ({days_until_due} days remaining)")
-                        print("⚠️ Book is near due - will select for renewal")
-                        near_due_books.append(book)
-                        print("-" * 50)
-                else:
-                    print(f"Title: {title}")
-                    print(f"Due Date: {due_date_str} (format not recognized)")
-                    print("-" * 50)
-        print(f"Total books: {len(borrowed_books)}")
-        print(f"Books near due: {len(near_due_books)}")
-    else:
-        print("No borrowed books found")
-    
-    # Step 10: Select near-due books for renewal
-    if near_due_books:
-        print("\nSelecting near-due books for renewal...")
-        for book in near_due_books:
-            row = rows[book['row_index']]
-            cols = row.find_elements(By.TAG_NAME, "td")
-            if cols:
-                checkbox = cols[0].find_element(By.TAG_NAME, "input")
-                if checkbox.get_attribute("type") == "checkbox" and not checkbox.is_selected():
-                    checkbox.click()
-                    print(f"Selected: {book['title']}")
+                    current_books[title] = due_date
         
-        # Step 11: Click the renew button and wait for processing
-        try:
-            renew_button = wait.until(EC.element_to_be_clickable((By.ID, "button.renew")))
-            renew_button.click()
-            print("Clicked renew button")
-            time.sleep(5)  # Wait for renewal processing to complete
-            print("Renewal processing completed")
-        except Exception as e:
-            print(f"Error during renewal: {str(e)}")
-    else:
-        print("No near-due books to renew")
-    
-    # Re-extract current books after renewal attempt
-    rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
-    current_books = {}
-    for row in rows:
-        cols = row.find_elements(By.TAG_NAME, "td")
-        if len(cols) >= 5:
-            title = cols[1].text.strip()
-            due_date_str = cols[4].text.strip()
-            due_date = parse_due_date(due_date_str)
-            if due_date:
-                current_books[title] = due_date
-    
-    # Step 12: Send email with borrowed book status
-    if current_books:
-        email_body = "Your currently borrowed books:\n\n"
-        for title, current_due_date in current_books.items():
-            email_body += f"Title: {title}\n"
-            email_body += f"Due Date: {current_due_date.strftime('%Y-%m-%d')}\n"
-            original_book = next((book for book in near_due_books if book['title'] == title), None)
-            if original_book:
-                if current_due_date > original_book['due_date']:
-                    email_body += "Renewal successful\n"
-                else:
-                    email_body += "Renewal failed\n"
-            email_body += "\n"
-    else:
-        email_body = "You have no borrowed books."
-    
-    send_email("Library Book Renewal Status", email_body)
+        # Step 12: Send email with borrowed book status
+        if current_books:
+            email_body = f"Library Book Renewal Status for {username}\n\n"
+            email_body += "Your currently borrowed books:\n\n"
+            for title, current_due_date in current_books.items():
+                email_body += f"Title: {title}\n"
+                email_body += f"Due Date: {current_due_date.strftime('%Y-%m-%d')}\n"
+                original_book = next((book for book in near_due_books if book['title'] == title), None)
+                if original_book:
+                    if current_due_date > original_book['due_date']:
+                        email_body += "Renewal successful\n"
+                    else:
+                        email_body += "Renewal failed\n"
+                email_body += "\n"
+        else:
+            email_body = f"Account {username}: You have no borrowed books."
+        
+        send_email("Library Book Renewal Status", email_body, email_receiver)
+        print(f"[{username}] Account processing completed successfully")
 
-except Exception as e:
-    print(f"\n❌ An error occurred: {str(e)}")
-    print(f"Current URL: {driver.current_url}")
-    print(f"Page title: {driver.title}")
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
-    with open(f"error_page_{timestamp}.html", "w", encoding="utf-8") as f:
-        f.write(driver.page_source)
-    driver.save_screenshot(f"error_screenshot_{timestamp}.png")
-    print(f"Saved error_page_{timestamp}.html and error_screenshot_{timestamp}.png")
+    except Exception as e:
+        print(f"\n[{username}] ❌ An error occurred: {str(e)}")
+        print(f"[{username}] Current URL: {driver.current_url}")
+        print(f"[{username}] Page title: {driver.title}")
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        with open(f"error_page_{username}_{timestamp}.html", "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
+        driver.save_screenshot(f"error_screenshot_{username}_{timestamp}.png")
+        print(f"[{username}] Saved error_page_{username}_{timestamp}.html and error_screenshot_{username}_{timestamp}.png")
 
-finally:
-    driver.quit()
-    print("Browser closed")
+    finally:
+        driver.quit()
+        print(f"[{username}] Browser closed")
+
+# Main execution
+if __name__ == "__main__":
+    accounts = get_accounts()
+    
+    if not accounts:
+        print("No accounts configured. Please set LIB_USERNAME and LIB_PASSWORD environment variables.")
+        exit(1)
+    
+    print(f"Found {len(accounts)} account(s) to process")
+    
+    for account in accounts:
+        process_account(account)
+    
+    print("\n" + "="*60)
+    print("All accounts processed")
+    print("="*60)
