@@ -4,7 +4,7 @@
 An automated Python script that helps users manage their Hong Kong Public Library borrowed books by:
 - Automatically logging into the HKPL account
 - Checking due dates of borrowed books
-- Identifying books that are due within 5 days
+- Identifying books that are due within 2 days
 - Automatically renewing books that are near their due date
 - Providing detailed console output of the renewal process
 - Saving error logs and screenshots if issues occur
@@ -12,7 +12,7 @@ An automated Python script that helps users manage their Hong Kong Public Librar
 ## Features
 - Automated login handling
 - Multi-format date parsing
-- Near-due book detection (< 5 days)
+- Near-due book detection (<= 2 days)
 - Automatic book renewal
 - Error handling with debug information
 - Chrome WebDriver automation
@@ -71,6 +71,14 @@ This project is configured to run automatically using GitHub Actions.
     - `EMAIL_SENDER`: Your Gmail address.
     - `EMAIL_RECEIVER`: The recipient email address.
     - `GMAIL_PWD`: Your Gmail App Password.
+    
+    To support multiple accounts, you can add:
+    - `LIB_USERNAME2`, `LIB_PASSWORD2`, `EMAIL_RECEIVER2`
+    - `LIB_USERNAME3`, `LIB_PASSWORD3`, `EMAIL_RECEIVER3`
+    - (Up to 9 accounts supported)
+
+    **Note:** The script will automatically skip any account if the `LIB_USERNAME` or `LIB_PASSWORD` is not set or is an empty string.
+
 4. The script is scheduled to run daily at 6 PM HKT. You can also trigger it manually from the **Actions** tab.
 
 ## Author

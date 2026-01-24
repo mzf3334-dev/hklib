@@ -27,9 +27,9 @@ def get_accounts():
     accounts = []
     
     # First account (no suffix)
-    username = get_config("LIB_USERNAME")
-    password = get_config("LIB_PASSWORD")
-    email_receiver = get_config("EMAIL_RECEIVER")
+    username = get_config("LIB_USERNAME", "").strip()
+    password = get_config("LIB_PASSWORD", "").strip()
+    email_receiver = get_config("EMAIL_RECEIVER", "").strip()
     if username and password:
         accounts.append({
             "username": username,
@@ -39,9 +39,9 @@ def get_accounts():
     
     # Check for additional accounts (2, 3, 4, ...)
     for i in range(2, 10):  # Support up to 9 accounts
-        username = get_config(f"LIB_USERNAME{i}")
-        password = get_config(f"LIB_PASSWORD{i}")
-        email_receiver = get_config(f"EMAIL_RECEIVER{i}")
+        username = get_config(f"LIB_USERNAME{i}", "").strip()
+        password = get_config(f"LIB_PASSWORD{i}", "").strip()
+        email_receiver = get_config(f"EMAIL_RECEIVER{i}", "").strip()
         if username and password:
             accounts.append({
                 "username": username,
@@ -192,7 +192,7 @@ def process_account(account):
                             'row_index': row_index
                         }
                         borrowed_books.append(book)
-                        if 0 <= days_until_due < 5:
+                        if 0 <= days_until_due <= 2:
                             print(f"Title: {title}")
                             print(f"Due Date: {due_date_str} ({days_until_due} days remaining)")
                             print("⚠️ Book is near due - will select for renewal")
