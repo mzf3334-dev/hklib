@@ -129,8 +129,7 @@ def process_account(account):
 
         # Step 2: Enter credentials and submit
         username_field = wait.until(EC.presence_of_element_located((By.NAME, "USER")))
-        password_field = wait.until(EC.presence_of_element_located((By.NAME, "PASSWORD")))
-        time.sleep(1)  # Allow JavaScript event handlers to attach
+        password_field = wait.until(EC.element_to_be_clickable((By.NAME, "PASSWORD")))
 
         username_field.clear()
         username_field.send_keys(username)
