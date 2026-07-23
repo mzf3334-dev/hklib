@@ -10,6 +10,13 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# HKPL UI markers used to detect when the login flow and account page have completed.
+POST_LOGIN_SELECTOR = "a.ac_logout_btn"
+ACCOUNT_PAGE_URL_FRAGMENT = "PatronAccountPage"
+CHECKOUT_TABLE_ID = "checkout"
+LOGIN_PAGE_URL_FRAGMENT = "login.html"
+
+
 def get_config(key, default=None):
     """Get configuration from environment variable"""
     return os.environ.get(key, default)
@@ -83,6 +90,28 @@ def parse_due_date(date_str):
     except Exception:
         return None
 
+
+def has_element(driver, by, value):
+    """Return True when an element is present on the current page; otherwise return False for a missing element."""
+    return bool(driver.find_elements(by, value))
+
+
+def login_flow_ready(driver):
+    """Return True when the account page URL is detected or the post-login button is visible."""
+    return (
+        ACCOUNT_PAGE_URL_FRAGMENT in driver.current_url
+        or has_element(driver, By.CSS_SELECTOR, POST_LOGIN_SELECTOR)
+    )
+
+
+def account_page_ready(driver):
+    """Return True when either the account page URL is detected or the checkout table appears on a non-login page."""
+    return ACCOUNT_PAGE_URL_FRAGMENT in driver.current_url or (
+        has_element(driver, By.ID, CHECKOUT_TABLE_ID)
+        and LOGIN_PAGE_URL_FRAGMENT not in driver.current_url
+    )
+
+
 def send_email(subject, body, receiver_email):
     """Send an email using Gmail SMTP"""
     sender_email = EMAIL_SENDER
@@ -138,9 +167,16 @@ def process_account(account):
         password_field.submit()
         print(f"[{username}] Step 2: Credentials submitted")
 
-        # Step 3: Wait until we have left the login page
-        wait.until(lambda d: "login.html" not in d.current_url)
-        print(f"[{username}] Step 3: Login successful - current URL: {driver.current_url}")
+        # Step 3: Wait until the login flow completes or the post-login account link appears
+        try:
+            wait.until(login_flow_ready)
+            print(f"[{username}] Step 3: Login flow progressed - current URL: {driver.current_url}")
+        except Exception:
+            print(
+                f"[{username}] Step 3: Timed out waiting for the login flow to complete "
+                f"(URL change or post-login link). Current URL: {driver.current_url}"
+            )
+            raise
         
         # Step 4: Handle popup and overlay
         try:
@@ -171,8 +207,15 @@ def process_account(account):
                 break
         
         # Step 8: Wait for the account page to load in the new tab
-        wait.until(EC.url_contains("PatronAccountPage"))
-        print(f"[{username}] Step 7: Account page loaded: {driver.current_url}")
+        try:
+            wait.until(account_page_ready)
+            print(f"[{username}] Step 7: Account page loaded: {driver.current_url}")
+        except Exception:
+            print(
+                f"[{username}] Step 7: Timed out waiting for the account page "
+                f"(URL containing 'PatronAccountPage' or checkout table). Current URL: {driver.current_url}"
+            )
+            raise
         
         # Step 9: Extract borrowed books and identify near-due items
         print(f"[{username}] Step 8: Extracting borrowed books...")
