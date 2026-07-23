@@ -101,7 +101,7 @@ def send_email(subject, body, receiver_email):
         print(f"Failed to send email: {str(e)}")
 
 def process_account(account):
-    """Process renewal for a single library account"""
+    """Process renewal for a single library account. Returns True on success, False on failure."""
     username = account["username"]
     password = account["password"]
     email_receiver = account.get("email_receiver")
@@ -271,6 +271,7 @@ def process_account(account):
         
         send_email("Library Book Renewal Status", email_body, email_receiver)
         print(f"[{username}] Account processing completed successfully")
+        return True
 
     except Exception as e:
         print(f"\n[{username}] ❌ An error occurred: {str(e)}")
@@ -281,6 +282,7 @@ def process_account(account):
             f.write(driver.page_source)
         driver.save_screenshot(f"error_screenshot_{username}_{timestamp}.png")
         print(f"[{username}] Saved error_page_{username}_{timestamp}.html and error_screenshot_{username}_{timestamp}.png")
+        return False
 
     finally:
         driver.quit()
@@ -296,9 +298,14 @@ if __name__ == "__main__":
     
     print(f"Found {len(accounts)} account(s) to process")
     
+    failed = False
     for account in accounts:
-        process_account(account)
+        if not process_account(account):
+            failed = True
     
     print("\n" + "="*60)
     print("All accounts processed")
     print("="*60)
+
+    if failed:
+        exit(1)
