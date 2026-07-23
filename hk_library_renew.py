@@ -119,17 +119,24 @@ def process_account(account):
         print(f"[{username}] Step 1: Login page loaded")
 
         # Step 2: Enter credentials and submit
-        username_field = wait.until(EC.presence_of_element_located((By.NAME, "USER")))
-        password_field = wait.until(EC.presence_of_element_located((By.NAME, "PASSWORD")))
+        username_field = wait.until(EC.element_to_be_clickable((By.NAME, "USER")))
+        password_field = wait.until(EC.element_to_be_clickable((By.NAME, "PASSWORD")))
         
+        username_field.clear()
         username_field.send_keys(username)
+        password_field.clear()
         password_field.send_keys(password)
-        password_field.submit()
+
+        # Click the submit button explicitly so JavaScript event handlers fire
+        login_button = wait.until(EC.element_to_be_clickable(
+            (By.CSS_SELECTOR, "input[type='submit'], button[type='submit']")
+        ))
+        login_button.click()
         print(f"[{username}] Step 2: Credentials submitted")
 
-        # Step 3: Wait for index page and confirm login
-        wait.until(EC.url_contains("index.html"))
-        print(f"[{username}] Step 3: Login successful - redirected to index page")
+        # Step 3: Wait until we have left the login page
+        wait.until(lambda d: "login.html" not in d.current_url)
+        print(f"[{username}] Step 3: Login successful - current URL: {driver.current_url}")
         
         # Step 4: Handle popup and overlay
         try:
@@ -144,7 +151,7 @@ def process_account(account):
         print(f"[{username}] Original window handle: {original_window}")
         
         # Step 6: Click the "Go" button which opens a new tab
-        go_link = wait.until(EC.presence_of_element_located(
+        go_link = wait.until(EC.element_to_be_clickable(
             (By.CSS_SELECTOR, "a.ac_logout_btn")
         ))
         go_link.click()
@@ -221,7 +228,9 @@ def process_account(account):
             
             # Step 11: Click the renew button and wait for processing
             try:
-                renew_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.renew")))
+                renew_button = wait.until(EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "#renew, button.renew, input[type='submit'][name='renew'], button[name='renew']")
+                ))
                 renew_button.click()
                 print(f"[{username}] Clicked renew button")
                 time.sleep(5)  # Wait for renewal processing to complete
