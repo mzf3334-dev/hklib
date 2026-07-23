@@ -54,11 +54,20 @@ def get_accounts():
 def create_driver():
     """Create and configure Chrome WebDriver"""
     chrome_options = Options()
+    chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument(
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
     if os.environ.get("GITHUB_ACTIONS"):
-        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--headless=new")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
     driver = webdriver.Chrome(options=chrome_options)
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    })
     return driver
 
 def parse_due_date(date_str):
@@ -119,19 +128,15 @@ def process_account(account):
         print(f"[{username}] Step 1: Login page loaded")
 
         # Step 2: Enter credentials and submit
-        username_field = wait.until(EC.element_to_be_clickable((By.NAME, "USER")))
-        password_field = wait.until(EC.element_to_be_clickable((By.NAME, "PASSWORD")))
-        
+        username_field = wait.until(EC.presence_of_element_located((By.NAME, "USER")))
+        password_field = wait.until(EC.presence_of_element_located((By.NAME, "PASSWORD")))
+        time.sleep(1)  # Allow JavaScript event handlers to attach
+
         username_field.clear()
         username_field.send_keys(username)
         password_field.clear()
         password_field.send_keys(password)
-
-        # Click the submit button explicitly so JavaScript event handlers fire
-        login_button = wait.until(EC.element_to_be_clickable(
-            (By.CSS_SELECTOR, "input[type='submit'], button[type='submit']")
-        ))
-        login_button.click()
+        password_field.submit()
         print(f"[{username}] Step 2: Credentials submitted")
 
         # Step 3: Wait until we have left the login page
