@@ -221,7 +221,7 @@ def process_account(account):
             
             # Step 11: Click the renew button and wait for processing
             try:
-                renew_button = wait.until(EC.element_to_be_clickable((By.ID, "button.renew")))
+                renew_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.renew")))
                 renew_button.click()
                 print(f"[{username}] Clicked renew button")
                 time.sleep(5)  # Wait for renewal processing to complete
