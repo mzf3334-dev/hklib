@@ -22,6 +22,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+
       - name: Run renewal script
         env:
           LIB_USERNAME: ${{ secrets.LIB_USERNAME }}
