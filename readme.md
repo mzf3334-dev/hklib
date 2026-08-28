@@ -4,7 +4,7 @@
 An automated Python script that helps users manage their Hong Kong Public Library borrowed books by:
 - Automatically logging into the HKPL account
 - Checking due dates of borrowed books
-- Identifying books that are due within 2 days
+- Identifying books that are due within 3 days
 - Automatically renewing books that are near their due date
 - Reporting each book's **Times Renewed** count (e.g., `1 of 5`) in the notification email
 - Detecting books that have already been renewed or are no longer eligible for renewal
@@ -14,9 +14,9 @@ An automated Python script that helps users manage their Hong Kong Public Librar
 ## Features
 - Automated login handling
 - Multi-format date parsing
-- Near-due book detection (<= 2 days)
+- Near-due book detection (<= 3 days)
 - Automatic book renewal for eligible items only
-- **Times Renewed** reporting in notification emails (e.g., `1 of 5`)
+- Times Renewed reporting in notification emails (e.g., `1 of 5`)
 - Skips already-renewed or non-renewable items
 - Resilient account-page loading with retry on internal errors
 - Error handling with debug information
