@@ -6,6 +6,8 @@ An automated Python script that helps users manage their Hong Kong Public Librar
 - Checking due dates of borrowed books
 - Identifying books that are due within 2 days
 - Automatically renewing books that are near their due date
+- Reporting each book's **Times Renewed** count (e.g., `1 of 5`) in the notification email
+- Detecting books that have already been renewed or are no longer eligible for renewal
 - Providing detailed console output of the renewal process
 - Saving error logs and screenshots if issues occur
 
@@ -13,7 +15,10 @@ An automated Python script that helps users manage their Hong Kong Public Librar
 - Automated login handling
 - Multi-format date parsing
 - Near-due book detection (<= 2 days)
-- Automatic book renewal
+- Automatic book renewal for eligible items only
+- **Times Renewed** reporting in notification emails (e.g., `1 of 5`)
+- Skips already-renewed or non-renewable items
+- Resilient account-page loading with retry on internal errors
 - Error handling with debug information
 - Chrome WebDriver automation
 
@@ -80,6 +85,14 @@ This project is configured to run automatically using GitHub Actions.
     **Note:** The script will automatically skip any account if the `LIB_USERNAME` or `LIB_PASSWORD` is not set or is an empty string.
 
 4. The script is scheduled to run daily at 6 PM HKT. You can also trigger it manually from the **Actions** tab.
+
+## Notification Email
+After each run, the script sends an email summarizing your borrowed books. Each book entry includes:
+
+- **Title**
+- **Due Date**
+- **Times Renewed** — the current renewal count shown by the library, for example `1 of 5`. If the value cannot be read, it will show `Not available`.
+- **Renewal result** — shown only for books that were near due and selected for renewal (`Renewal successful` or `Renewal failed`).
 
 ## Author
 Developed by Tony Mok
