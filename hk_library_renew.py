@@ -73,6 +73,7 @@ def create_driver():
 def parse_due_date(date_str):
     """Parse different date formats from the library system"""
     try:
+        date_str = "".join(date_str.split())
         formats = ["%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d-%b-%Y"]
         for fmt in formats:
             try:
@@ -82,6 +83,62 @@ def parse_due_date(date_str):
         return None
     except Exception:
         return None
+
+
+def find_renew_button(driver, wait):
+    """Find the renew button using multiple selector strategies."""
+    selectors = [
+        (By.CSS_SELECTOR, "#renew"),
+        (By.CSS_SELECTOR, "button.renew"),
+        (By.CSS_SELECTOR, "input[type='submit'][name='renew']"),
+        (By.CSS_SELECTOR, "button[name='renew']"),
+        (By.XPATH, "//input[contains(translate(@value, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'renew')]"),
+        (By.XPATH, "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'renew')]"),
+        (By.XPATH, "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'renew')]"),
+    ]
+
+    for by, selector in selectors:
+        try:
+            elements = driver.find_elements(by, selector)
+            for elem in elements:
+                if elem.is_displayed() and elem.is_enabled():
+                    return elem
+        except Exception:
+            continue
+
+    # Final fallback: wait for any clickable renew-like element
+    return wait.until(EC.element_to_be_clickable(
+        (By.XPATH, "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'renew')]")
+    ))
+
+
+def get_checkout_table(driver, username):
+    """Locate the checkout table, refreshing if the page shows an internal error."""
+    short_wait = WebDriverWait(driver, 10)
+    for attempt in range(1, 4):
+        try:
+            if "Internal Error" in driver.title:
+                print(f"[{username}] Account page shows internal error (attempt {attempt}), refreshing...")
+                driver.refresh()
+                time.sleep(3)
+                continue
+
+            table = short_wait.until(EC.presence_of_element_located((By.ID, "checkout")))
+            return table
+        except Exception as e:
+            print(f"[{username}] Checkout table not ready (attempt {attempt}): {type(e).__name__}")
+            if attempt < 3:
+                try:
+                    driver.refresh()
+                    time.sleep(3)
+                except Exception as refresh_err:
+                    print(f"[{username}] Refresh failed: {refresh_err}")
+                    raise
+            else:
+                raise RuntimeError(f"Checkout table not found after {attempt} attempts: {type(e).__name__}")
+
+    raise RuntimeError("Checkout table not found")
+
 
 def send_email(subject, body, receiver_email):
     """Send an email using Gmail SMTP"""
@@ -173,17 +230,23 @@ def process_account(account):
         # Step 8: Wait for the account page to load in the new tab
         wait.until(EC.url_contains("PatronAccountPage"))
         print(f"[{username}] Step 7: Account page loaded: {driver.current_url}")
-        
+
+        # Wait for the page to finish rendering
+        wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
+        time.sleep(2)
+
         # Step 9: Extract borrowed books and identify near-due items
         print(f"[{username}] Step 8: Extracting borrowed books...")
-        
-        table = wait.until(EC.presence_of_element_located((By.ID, "checkout")))
+
+        table = get_checkout_table(driver, username)
         print(f"[{username}] Found checkout table")
         
         rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
         today = datetime.now()
         borrowed_books = []
         near_due_books = []
+        renewable_books = []
+        renewal_error = None
         
         if rows:
             print(f"\n[{username}] Your Borrowed Books:")
@@ -193,6 +256,10 @@ def process_account(account):
                 if len(cols) >= 5:
                     title = cols[1].text.strip()
                     due_date_str = cols[4].text.strip()
+                    selection_text = cols[0].text.strip()
+                    renewal_checkboxes = cols[0].find_elements(
+                        By.CSS_SELECTOR, "input[type='checkbox']"
+                    )
                     due_date = parse_due_date(due_date_str)
                     if due_date:
                         days_until_due = (due_date - today).days
@@ -208,6 +275,17 @@ def process_account(account):
                             print(f"Due Date: {due_date_str} ({days_until_due} days remaining)")
                             print("⚠️ Book is near due - will select for renewal")
                             near_due_books.append(book)
+                            if (
+                                "already renewed" not in selection_text.lower()
+                                and any(
+                                    checkbox.is_displayed() and checkbox.is_enabled()
+                                    for checkbox in renewal_checkboxes
+                                )
+                            ):
+                                renewable_books.append(book)
+                            else:
+                                status = selection_text or "no selectable checkbox"
+                                print(f"Renewal unavailable ({status})")
                             print("-" * 50)
                     else:
                         print(f"Title: {title}")
@@ -219,28 +297,39 @@ def process_account(account):
             print(f"[{username}] No borrowed books found")
         
         # Step 10: Select near-due books for renewal
-        if near_due_books:
+        if renewable_books:
             print(f"\n[{username}] Selecting near-due books for renewal...")
-            for book in near_due_books:
-                row = rows[book['row_index']]
-                cols = row.find_elements(By.TAG_NAME, "td")
-                if cols:
-                    checkbox = cols[0].find_element(By.TAG_NAME, "input")
-                    if checkbox.get_attribute("type") == "checkbox" and not checkbox.is_selected():
-                        checkbox.click()
-                        print(f"[{username}] Selected: {book['title']}")
-            
-            # Step 11: Click the renew button and wait for processing
             try:
-                renew_button = wait.until(EC.element_to_be_clickable(
-                    (By.CSS_SELECTOR, "#renew, button.renew, input[type='submit'][name='renew'], button[name='renew']")
-                ))
-                renew_button.click()
-                print(f"[{username}] Clicked renew button")
-                time.sleep(5)  # Wait for renewal processing to complete
-                print(f"[{username}] Renewal processing completed")
+                selected_count = 0
+                for book in renewable_books:
+                    row = rows[book['row_index']]
+                    cols = row.find_elements(By.TAG_NAME, "td")
+                    checkboxes = cols[0].find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
+                    if checkboxes:
+                        checkbox = checkboxes[0]
+                        if checkbox.is_displayed() and checkbox.is_enabled():
+                            if not checkbox.is_selected():
+                                checkbox.click()
+                                print(f"[{username}] Selected: {book['title']}")
+                            selected_count += 1
+
+                if selected_count:
+                    renew_button = find_renew_button(driver, wait)
+                    try:
+                        renew_button.click()
+                    except Exception as click_err:
+                        print(f"[{username}] Normal click failed ({click_err}), trying JavaScript click")
+                        driver.execute_script("arguments[0].click();", renew_button)
+                    print(f"[{username}] Clicked renew button")
+                    time.sleep(5)  # Wait for renewal processing to complete
+                    print(f"[{username}] Renewal processing completed")
+                else:
+                    print(f"[{username}] No selectable near-due books found")
             except Exception as e:
-                print(f"[{username}] Error during renewal: {str(e)}")
+                renewal_error = f"{type(e).__name__}: {str(e) or 'no additional details'}"
+                print(f"[{username}] Error during renewal: {renewal_error}")
+        elif near_due_books:
+            print(f"[{username}] No near-due books are eligible for renewal")
         else:
             print(f"[{username}] No near-due books to renew")
         
@@ -254,15 +343,25 @@ def process_account(account):
                 due_date_str = cols[4].text.strip()
                 due_date = parse_due_date(due_date_str)
                 if due_date:
-                    current_books[title] = due_date
+                    times_renewed = (
+                        " ".join(cols[5].text.split())
+                        if len(cols) >= 6
+                        else "Not available"
+                    )
+                    current_books[title] = {
+                        "due_date": due_date,
+                        "times_renewed": times_renewed or "Not available"
+                    }
         
         # Step 12: Send email with borrowed book status
         if current_books:
             email_body = f"Library Book Renewal Status for {username}\n\n"
             email_body += "Your currently borrowed books:\n\n"
-            for title, current_due_date in current_books.items():
+            for title, book_status in current_books.items():
+                current_due_date = book_status["due_date"]
                 email_body += f"Title: {title}\n"
                 email_body += f"Due Date: {current_due_date.strftime('%Y-%m-%d')}\n"
+                email_body += f"Times Renewed: {book_status['times_renewed']}\n"
                 original_book = next((book for book in near_due_books if book['title'] == title), None)
                 if original_book:
                     if current_due_date > original_book['due_date']:
@@ -272,6 +371,9 @@ def process_account(account):
                 email_body += "\n"
         else:
             email_body = f"Account {username}: You have no borrowed books."
+
+        if renewal_error:
+            email_body += f"\nRenewal action error: {renewal_error}\n"
         
         send_email("Library Book Renewal Status", email_body, email_receiver)
         print(f"[{username}] Account processing completed successfully")
