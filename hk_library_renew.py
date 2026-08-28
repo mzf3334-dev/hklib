@@ -85,15 +85,24 @@ def parse_due_date(date_str):
         return None
 
 
-def extract_column_index_by_header(table, header_text):
-    """Find the zero-based column index whose header matches header_text."""
+def extract_column_index_by_header(table, *header_keywords):
+    """Find the zero-based column index whose header contains any of the keywords."""
     try:
-        headers = table.find_elements(By.CSS_SELECTOR, "thead th, tr th")
+        headers = table.find_elements(By.CSS_SELECTOR, "thead th, tr th, thead td, tr td")
         for idx, th in enumerate(headers):
-            if header_text.lower() in th.text.lower():
-                return idx
-    except Exception:
-        pass
+            header = th.text.strip().lower()
+            if not header:
+                continue
+            for keyword in header_keywords:
+                if keyword.lower() in header:
+                    print(f"[debug] Matched header '{th.text.strip()}' at index {idx} for keyword '{keyword}'")
+                    return idx
+        # Log unmatched headers for debugging
+        header_texts = [th.text.strip() for th in headers]
+        if header_texts:
+            print(f"[debug] Table headers found: {header_texts}")
+    except Exception as e:
+        print(f"[debug] Header extraction failed: {e}")
     return None
 
 
@@ -104,16 +113,20 @@ def extract_times_renewed(cols, times_renewed_index=None):
 
     if times_renewed_index is not None and 0 <= times_renewed_index < len(cols):
         text = " ".join(cols[times_renewed_index].text.split())
+        print(f"[debug] Times Renewed column {times_renewed_index} raw text: '{cols[times_renewed_index].text}'")
         match = pattern.search(text)
         if match:
             return match.group(0)
 
-    for col in cols:
+    print("[debug] Falling back to scanning all row cells for 'X of Y'")
+    for idx, col in enumerate(cols):
         text = " ".join(col.text.split())
         if text:
             match = pattern.search(text)
             if match:
+                print(f"[debug] Found match '{match.group(0)}' in column {idx}")
                 return match.group(0)
+    print("[debug] No 'X of Y' pattern found in any cell")
     return "Not available"
 
 
@@ -273,7 +286,7 @@ def process_account(account):
         table = get_checkout_table(driver, username)
         print(f"[{username}] Found checkout table")
 
-        times_renewed_index = extract_column_index_by_header(table, "Times Renewed")
+        times_renewed_index = extract_column_index_by_header(table, "Times Renewed", "Renewed", "續借")
         if times_renewed_index is not None:
             print(f"[{username}] 'Times Renewed' column index: {times_renewed_index}")
         else:
@@ -382,6 +395,7 @@ def process_account(account):
                 due_date = parse_due_date(due_date_str)
                 if due_date:
                     times_renewed = extract_times_renewed(cols, times_renewed_index)
+                    print(f"[{username}] Row {row_index}: title='{title}', due={due_date_str}, times_renewed='{times_renewed}'")
                     current_books[title] = {
                         "due_date": due_date,
                         "times_renewed": times_renewed
