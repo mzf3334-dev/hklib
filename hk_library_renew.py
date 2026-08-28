@@ -85,6 +85,38 @@ def parse_due_date(date_str):
         return None
 
 
+def extract_column_index_by_header(table, header_text):
+    """Find the zero-based column index whose header matches header_text."""
+    try:
+        headers = table.find_elements(By.CSS_SELECTOR, "thead th, tr th")
+        for idx, th in enumerate(headers):
+            if header_text.lower() in th.text.lower():
+                return idx
+    except Exception:
+        pass
+    return None
+
+
+def extract_times_renewed(cols, times_renewed_index=None):
+    """Extract times renewed value. Prefer the column matched by header; otherwise scan all cells."""
+    import re
+    pattern = re.compile(r"\d+\s*of\s*\d+", re.IGNORECASE)
+
+    if times_renewed_index is not None and 0 <= times_renewed_index < len(cols):
+        text = " ".join(cols[times_renewed_index].text.split())
+        match = pattern.search(text)
+        if match:
+            return match.group(0)
+
+    for col in cols:
+        text = " ".join(col.text.split())
+        if text:
+            match = pattern.search(text)
+            if match:
+                return match.group(0)
+    return "Not available"
+
+
 def find_renew_button(driver, wait):
     """Find the renew button using multiple selector strategies."""
     selectors = [
@@ -240,7 +272,13 @@ def process_account(account):
 
         table = get_checkout_table(driver, username)
         print(f"[{username}] Found checkout table")
-        
+
+        times_renewed_index = extract_column_index_by_header(table, "Times Renewed")
+        if times_renewed_index is not None:
+            print(f"[{username}] 'Times Renewed' column index: {times_renewed_index}")
+        else:
+            print(f"[{username}] 'Times Renewed' header not found, will scan row cells")
+
         rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
         today = datetime.now()
         borrowed_books = []
@@ -336,26 +374,25 @@ def process_account(account):
         # Re-extract current books after renewal attempt
         rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
         current_books = {}
-        for row in rows:
+        for row_index, row in enumerate(rows):
             cols = row.find_elements(By.TAG_NAME, "td")
             if len(cols) >= 5:
                 title = cols[1].text.strip()
                 due_date_str = cols[4].text.strip()
                 due_date = parse_due_date(due_date_str)
                 if due_date:
-                    times_renewed = (
-                        " ".join(cols[5].text.split())
-                        if len(cols) >= 6
-                        else "Not available"
-                    )
+                    times_renewed = extract_times_renewed(cols, times_renewed_index)
                     current_books[title] = {
                         "due_date": due_date,
-                        "times_renewed": times_renewed or "Not available"
+                        "times_renewed": times_renewed
                     }
+                else:
+                    print(f"[{username}] Row {row_index}: could not parse due date '{due_date_str}'")
         
         # Step 12: Send email with borrowed book status
         if current_books:
             email_body = f"Library Book Renewal Status for {username}\n\n"
+            email_body += f"Total borrowed books: {len(current_books)}\n\n"
             email_body += "Your currently borrowed books:\n\n"
             for title, book_status in current_books.items():
                 current_due_date = book_status["due_date"]
