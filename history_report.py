@@ -105,6 +105,17 @@ def display_account(account, options):
     return mask_account(account) if options.mask_account else account
 
 
+def safe_account_label(account, options):
+    """Return a filesystem-safe account label for output filenames.
+
+    Masked filenames avoid '*' because artifact uploads reject it;
+    only the last 4 characters of the card number are kept.
+    """
+    if not options.mask_account:
+        return os.path.basename(history_store.history_path(account))[:-5]
+    return f"masked{account[-4:]}" if len(account) > 4 else "masked"
+
+
 def fmt_cm(value):
     """Format a cm value without trailing zeros (5.0 -> '5', 2.5 -> '2.5')."""
     return f"{value:g}"
@@ -232,11 +243,8 @@ def generate_reports(accounts, start, end, options):
             print(f"[{account}] No borrowed records in {start} - {end}")
             continue
         html_text = build_html(account, records, start, end, options)
-        safe_account = os.path.basename(history_store.history_path(account))[:-5]
-        if options.mask_account:
-            safe_account = mask_account(account)
         filename = (
-            f"borrow_history_{safe_account}"
+            f"borrow_history_{safe_account_label(account, options)}"
             f"_{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}.html"
         )
         path = os.path.join(output_dir, filename)
