@@ -4,6 +4,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from datetime import datetime, timedelta
+import html
+import re
 import time
 import os
 import smtplib
@@ -11,6 +13,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 import history_store
+
+CALL_NO_LABEL_RE = re.compile(r"索書號|call\s*number|call\s*no", re.IGNORECASE)
 
 def get_config(key, default=None):
     """Get configuration from environment variable"""
@@ -110,7 +114,6 @@ def extract_column_index_by_header(table, *header_keywords):
 
 def extract_times_renewed(cols, times_renewed_index=None):
     """Extract times renewed value. Prefer the column matched by header; otherwise scan all cells."""
-    import re
     pattern = re.compile(r"\d+\s*of\s*\d+", re.IGNORECASE)
 
     if times_renewed_index is not None and 0 <= times_renewed_index < len(cols):
@@ -217,6 +220,185 @@ def get_checkout_table(driver, username):
     raise RuntimeError("Checkout table not found")
 
 
+def looks_like_call_no(text):
+    """Check whether a text snippet is plausibly a call number / e-book source."""
+    t = re.sub(r"\s+", " ", text or "").strip(" :：-–—|")
+    if not t or len(t) > 40:
+        return False
+    for word in ("館藏地", "條碼", "狀態", "應還", "到期", "館別", "架位", "索書號",
+                 "Call No", "Call Number", "Collection", "Status"):
+        if word.lower() in t.lower():
+            return False
+    if "/" in t:
+        return False
+    if not re.search(r"\d", t):
+        return any(source in t.lower() for source in history_store.EBOOK_SOURCES)
+    return bool(re.search(r"[A-Za-z.]", t) or " " in t)
+
+
+def clean_call_no_candidate(text, label_text=""):
+    """Remove the label text and stray separators from a candidate snippet."""
+    t = re.sub(r"\s+", " ", text or "").strip()
+    if label_text:
+        t = re.sub(re.escape(re.sub(r"\s+", " ", label_text).strip()), " ", t, count=1)
+    t = re.sub(r"(索書號|call\s*no\.?|call\s*number)\s*[:：]?", " ", t, flags=re.IGNORECASE, count=1)
+    return t.strip(" :：|")
+
+
+def _call_no_from_tables(page):
+    """Scan HTML tables for a 索書號/Call Number column and read its first value."""
+    soup = None
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(page, "html.parser")
+    except Exception:
+        return ""
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        if len(rows) < 2:
+            continue
+        header_cells = rows[0].find_all(["th", "td"])
+        col_idx = None
+        for idx, cell in enumerate(header_cells):
+            if CALL_NO_LABEL_RE.search(cell.get_text(" ", strip=True)):
+                col_idx = idx
+                break
+        if col_idx is None:
+            continue
+        for row in rows[1:]:
+            cells = row.find_all(["td", "th"])
+            if col_idx < len(cells):
+                value = clean_call_no_candidate(cells[col_idx].get_text(" ", strip=True))
+                if looks_like_call_no(value):
+                    return value
+    return ""
+
+
+def _call_no_from_labels(page):
+    """Scan HTML for label text nodes and read the value beside them."""
+    soup = None
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(page, "html.parser")
+    except Exception:
+        return ""
+    for text_node in soup.find_all(string=CALL_NO_LABEL_RE):
+        parent = text_node.parent
+        if parent is None:
+            continue
+        label_text = re.sub(r"\s+", " ", text_node.strip())
+        if not label_text or len(label_text) > 30:
+            continue
+        value = clean_call_no_candidate(parent.get_text(" ", strip=True), label_text)
+        if looks_like_call_no(value):
+            return value
+        sibling = parent.find_next_sibling()
+        if sibling is not None:
+            value = clean_call_no_candidate(sibling.get_text(" ", strip=True), "")
+            if looks_like_call_no(value):
+                return value
+    return ""
+
+
+def extract_call_no(driver):
+    """Extract the call number (索書號) from a catalogue detail page.
+
+    Tries, in order: label elements in the live DOM, structured HTML table
+    columns, generic HTML label/value pairs, and finally a text-flow scan of
+    the page source. Returns '' when nothing plausible is found.
+    """
+    label_xpaths = [
+        "//*[contains(text(), '索書號')]",
+        "//*[contains(text(), 'Call Number')]",
+        "//*[contains(text(), 'Call No')]",
+    ]
+    for xpath in label_xpaths:
+        try:
+            labels = driver.find_elements(By.XPATH, xpath)
+        except Exception:
+            continue
+        for label in labels:
+            try:
+                label_text = label.text.strip()
+                if not label_text or len(label_text) > 30:
+                    continue
+                candidates = []
+                try:
+                    row = label.find_element(By.XPATH, "ancestor::tr[1]")
+                    if row is not label:
+                        candidates.append(row.text)
+                except Exception:
+                    pass
+                if not candidates:
+                    try:
+                        candidates.append(label.find_element(By.XPATH, "..").text)
+                    except Exception:
+                        pass
+                try:
+                    candidates.append(
+                        label.find_element(By.XPATH, "following-sibling::*[1]").text
+                    )
+                except Exception:
+                    pass
+                for candidate in candidates:
+                    value = clean_call_no_candidate(candidate, label_text)
+                    if looks_like_call_no(value):
+                        return value
+            except Exception:
+                continue
+
+    try:
+        page = driver.page_source or ""
+    except Exception:
+        return ""
+    if not page:
+        return ""
+
+    value = _call_no_from_tables(page)
+    if value:
+        return value
+    value = _call_no_from_labels(page)
+    if value:
+        return value
+
+    text = re.sub(r"<script\b.*?</script>|<style\b.*?</style>", " ", page, flags=re.S | re.I)
+    text = html.unescape(re.sub(r"<[^>]+>", "\n", text))
+    lines = [line.strip() for line in text.splitlines()]
+    for i, line in enumerate(lines):
+        if not line or not CALL_NO_LABEL_RE.search(line):
+            continue
+        remainder = clean_call_no_candidate(line, "")
+        if looks_like_call_no(remainder):
+            return remainder
+        for j in range(i + 1, min(i + 13, len(lines))):
+            nxt = lines[j]
+            if not nxt:
+                continue
+            if CALL_NO_LABEL_RE.search(nxt):
+                break
+            if looks_like_call_no(nxt):
+                return nxt
+    return ""
+
+
+def fetch_call_no(driver, wait, detail_url, username, title):
+    """Open a book's detail page and extract its call number (索書號)."""
+    try:
+        print(f"[{username}] Fetching call number from detail page: {title}")
+        driver.get(detail_url)
+        wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
+        time.sleep(1)
+        value = extract_call_no(driver)
+        if value:
+            print(f"[{username}] Call number found: {value}")
+        else:
+            print(f"[{username}] Call number not found on detail page")
+        return value
+    except Exception as e:
+        print(f"[{username}] Failed to fetch call number for '{title}': {e}")
+        return ""
+
+
 def build_book_record(username, row_index, cols, column_indexes, times_renewed_index):
     """Parse one checkout row into a detailed book record.
 
@@ -232,6 +414,20 @@ def build_book_record(username, row_index, cols, column_indexes, times_renewed_i
 
     title_cell = cell_text("title") or (raw_cells[1] if len(raw_cells) > 1 else "")
     due_date_str = cell_text("due") or (raw_cells[4] if len(raw_cells) > 4 else "")
+
+    title_idx = column_indexes.get("title")
+    if title_idx is None or not (0 <= title_idx < len(cols)):
+        title_idx = 1 if len(cols) > 1 else None
+    detail_url = ""
+    if title_idx is not None:
+        try:
+            for anchor in cols[title_idx].find_elements(By.CSS_SELECTOR, "a[href]"):
+                href = (anchor.get_attribute("href") or "").strip()
+                if href and not href.lower().startswith("javascript"):
+                    detail_url = href
+                    break
+        except Exception:
+            detail_url = ""
     due_date = parse_due_date(due_date_str)
     if not due_date:
         print(f"[{username}] Row {row_index}: could not parse due date '{due_date_str}'")
@@ -258,6 +454,7 @@ def build_book_record(username, row_index, cols, column_indexes, times_renewed_i
         "history_title": history_title,
         "author": author,
         "call_no": call_no,
+        "detail_url": detail_url,
         "due_date": due_date,
         "due_date_str": due_date_str,
         "times_renewed": times_renewed,
@@ -473,6 +670,11 @@ def process_account(account):
                 book = build_book_record(username, row_index, cols, column_indexes, times_renewed_index)
                 if book:
                     current_books.append(book)
+
+        for book in current_books:
+            if book["call_no"] or not book.get("detail_url"):
+                continue
+            book["call_no"] = fetch_call_no(driver, wait, book["detail_url"], username, book["title"])
 
         # Step 12: Record borrow history and send email with borrowed book status
         try:

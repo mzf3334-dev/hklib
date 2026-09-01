@@ -95,6 +95,16 @@ def display_title(record):
     return f"{title} / {author}" if author else title
 
 
+def mask_account(account):
+    """Mask an account id, keeping only the last 4 characters."""
+    return f"****{account[-4:]}" if len(account) > 4 else "****"
+
+
+def display_account(account, options):
+    """Return the account label to show in reports and filenames."""
+    return mask_account(account) if options.mask_account else account
+
+
 def fmt_cm(value):
     """Format a cm value without trailing zeros (5.0 -> '5', 2.5 -> '2.5')."""
     return f"{value:g}"
@@ -137,7 +147,7 @@ def build_html(account, records, start, end, options):
     body_parts = []
     for page_no, page_records in enumerate(pages, start=1):
         meta = (
-            f"<p class='meta'>Account: {html.escape(account)} | "
+            f"<p class='meta'>Account: {html.escape(display_account(account, options))} | "
             f"Borrowed history 借閱紀錄 {start.strftime('%Y.%m.%d')} - {end.strftime('%Y.%m.%d')} | "
             f"Page {page_no}/{total_pages} | Generated {today}</p>"
         )
@@ -180,7 +190,7 @@ table.records td .clip {{ max-height: {clip_height}cm; overflow: hidden;
 div.pagebreak {{ page-break-after: always; }}
 """
 
-    title = f"Borrowed History {start.strftime('%Y.%m.%d')} - {end.strftime('%Y.%m.%d')} ({html.escape(account)})"
+    title = f"Borrowed History {start.strftime('%Y.%m.%d')} - {end.strftime('%Y.%m.%d')} ({html.escape(display_account(account, options))})"
     return (
         f"<!DOCTYPE html><html lang='zh-HK'><head><meta charset='utf-8'>"
         f"<title>{title}</title><style>{css}</style></head><body>"
@@ -189,11 +199,32 @@ div.pagebreak {{ page-break-after: always; }}
     )
 
 
+def build_index(entries, start, end):
+    """Build the index page listing the generated reports."""
+    today = date.today().strftime("%Y.%m.%d")
+    items = "".join(
+        f"<li><a href='{html.escape(filename)}'>Account 帳戶: {html.escape(name)}</a> "
+        f"— {count} book(s)</li>"
+        for name, filename, count in entries
+    )
+    return (
+        "<!DOCTYPE html><html lang='zh-HK'><head><meta charset='utf-8'>"
+        "<title>Borrowed History Reports 借閱紀錄報告</title><style>"
+        "body { font-family: 'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', sans-serif;"
+        " margin: 2cm; } h1 { font-size: 14pt; } p.meta { color: #444; font-size: 9pt; }"
+        " li { margin: 3mm 0; font-size: 11pt; }</style></head><body>"
+        "<h1>Borrowed History Reports 借閱紀錄報告</h1>"
+        f"<p class='meta'>Period 期間: {start.strftime('%Y.%m.%d')} - {end.strftime('%Y.%m.%d')}"
+        f" | Generated 製作日期: {today}</p><ul>{items}</ul></body></html>"
+    )
+
+
 def generate_reports(accounts, start, end, options):
-    """Generate one HTML report per account; returns list of output paths."""
+    """Generate one HTML report per account plus an index page; returns paths."""
     output_dir = options.output
     os.makedirs(output_dir, exist_ok=True)
     written = []
+    entries = []
     for account in accounts:
         history = history_store.load_history(account)
         records = select_records(history, start, end)
@@ -202,6 +233,8 @@ def generate_reports(accounts, start, end, options):
             continue
         html_text = build_html(account, records, start, end, options)
         safe_account = os.path.basename(history_store.history_path(account))[:-5]
+        if options.mask_account:
+            safe_account = mask_account(account)
         filename = (
             f"borrow_history_{safe_account}"
             f"_{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}.html"
@@ -212,6 +245,13 @@ def generate_reports(accounts, start, end, options):
         pages = (len(records) + options.rows_per_page - 1) // options.rows_per_page
         print(f"[{account}] {len(records)} book(s), {pages} page(s) -> {path}")
         written.append(path)
+        entries.append((display_account(account, options), filename, len(records)))
+
+    if entries:
+        index_path = os.path.join(output_dir, "index.html")
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write(build_index(entries, start, end))
+        print(f"Index page -> {index_path}")
     return written
 
 
@@ -238,6 +278,8 @@ def parse_args(argv):
                         help="data font size in pt (default: 9)")
     parser.add_argument("--with-dates", action="store_true",
                         help="add a Borrowed-Returned date column")
+    parser.add_argument("--mask-account", action="store_true",
+                        help="mask account/card numbers (e.g. ****1234) in output and filenames")
     parser.add_argument("--no-empty-rows", action="store_true",
                         help="do not pad the last page with empty rows")
     parser.add_argument("--output", default="reports",

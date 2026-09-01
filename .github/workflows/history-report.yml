@@ -19,6 +19,12 @@ on:
 jobs:
   report:
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -34,7 +40,7 @@ jobs:
           INPUT_END: ${{ github.event.inputs.end_date }}
           INPUT_ACCOUNT: ${{ github.event.inputs.account }}
         run: |
-          args=()
+          args=(--mask-account)
           if [ -z "$INPUT_START" ] && [ -z "$INPUT_END" ]; then
             START=$(date -d "-1 year" +%Y.%m.%d)
             END=$(date +%Y.%m.%d)
@@ -59,9 +65,29 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: reports
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+
       - name: Write job summary
         if: always()
         run: |
-          echo "## Borrowed History Report" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Download **borrowed-history-report-${{ github.run_number }}** from the **Artifacts** section of this run page, unzip it, open the HTML file in a browser and print to A4 (Ctrl+P / Cmd+P)." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Borrowed History Report"
+            echo ""
+            if [ "${{ steps.deployment.outcome }}" = "success" ]; then
+              echo "View online: ${{ steps.deployment.outputs.page_url }}"
+            else
+              echo "GitHub Pages is not enabled yet. Go to **Settings → Pages → Build and deployment → Source: GitHub Actions**, then re-run this workflow to get a direct view URL."
+            fi
+            echo "You can also download **borrowed-history-report-${{ github.run_number }}** from the **Artifacts** section of this run page, unzip it, open the HTML file in a browser and print to A4 (Ctrl+P / Cmd+P)."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -67,11 +67,14 @@ def guess_call_no(cells, skip_texts):
 
 
 def record_key(book):
-    """Build a stable identity key for a borrowed book."""
+    """Build a stable identity key for a borrowed book.
+
+    The key uses title and author only, so a record keeps its identity even
+    after the call number is backfilled from the book detail page later.
+    """
     parts = [
         normalize_text(book.get("title")),
         normalize_text(book.get("author")),
-        normalize_text(book.get("call_no")),
     ]
     return "|".join(parts)
 
@@ -125,14 +128,17 @@ def update_history(username, current_books, run_date=None):
         if rec.get("returned_date") is None:
             open_by_key[record_key(rec)] = rec
 
-    seen_keys = set()
     new_books = []
     for book in current_books:
         key = record_key(book)
-        seen_keys.add(key)
         existing = open_by_key.get(key)
         if existing:
             existing["last_seen"] = run_date_str
+            if not existing.get("call_no") and (book.get("call_no") or "").strip():
+                existing["call_no"] = book["call_no"].strip()
+                print(f"[history] Backfilled call number for '{existing['title']}': {existing['call_no']}")
+            if not existing.get("author") and (book.get("author") or "").strip():
+                existing["author"] = book["author"].strip()
             continue
         record = {
             "title": (book.get("title") or "").strip(),

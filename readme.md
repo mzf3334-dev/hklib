@@ -93,6 +93,7 @@ This project is configured to run automatically using GitHub Actions.
 The script keeps a borrowing history for each library account so past loans are never lost:
 
 - Every book the script sees on loan **for the first time** is recorded in `history/<account>.json` with its title, author and call number (or e-book source), plus the date it was first seen.
+- The **call number (索書號)** is not shown on the loans list, so the script also opens each book's detail page (the link on the title) and reads the call number from there. Books recorded before this feature keep a blank call number, which is backfilled automatically on a later run.
 - A book that stays on loan keeps its record and has its `last_seen` date refreshed on every run.
 - When a book no longer appears in the loans list, its record is marked as returned (`returned_date` = the run date when the return was first noticed).
 
@@ -150,6 +151,7 @@ All layout values can be adjusted:
 | `--col2-width` | 2.5 | Second column width in cm |
 | `--font-size` | 9 | Data font size in pt |
 | `--with-dates` | off | Adds a Borrowed/Returned date column |
+| `--mask-account` | off | Mask card numbers (e.g. `****8445`) in output and filenames |
 | `--no-empty-rows` | off | Do not pad the last page with empty rows |
 | `--output` | reports | Output directory |
 | `--history-dir` | history | Directory containing history files |
@@ -167,6 +169,19 @@ You can generate and download the report without a local setup:
 4. Unzip, open the HTML file in a browser and print to A4 (Ctrl+P / Cmd+P).
 
 The report uses the borrow history files committed to the repository by the daily renewal run.
+
+### Viewing Reports Online (GitHub Pages)
+
+Both workflows also publish the report to GitHub Pages, giving you a direct URL to view the result — no download needed:
+
+- **Scheduled renewal run** — automatically publishes a rolling report of the last 12 months for all cards after each daily run.
+- **Manual report run** — publishes the report for the period you entered.
+
+The URL is `https://<owner>.github.io/<repo>/` (for example `https://mzf3334-dev.github.io/hklib/`), shown in the run's summary page once deployment succeeds.
+
+One-time setup: go to **Settings → Pages → Build and deployment → Source** and select **GitHub Actions**. Until this is done, the deploy step is skipped with a warning in the run summary.
+
+Published pages mask card numbers (e.g. `****8445`) because the site is publicly accessible.
 
 ## Notification Email
 After each run, the script sends an email summarizing your borrowed books. Each book entry includes:
