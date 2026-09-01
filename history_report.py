@@ -23,6 +23,7 @@ DATE_FORMATS = ["%Y.%m.%d", "%Y-%m-%d", "%Y/%m/%d"]
 PERIOD_PATTERN = re.compile(
     r"(\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2})\s*(?:-|–|—|to|至)\s*(\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2})"
 )
+DATE_TOKEN_PATTERN = re.compile(r"\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}")
 
 
 def parse_date(text):
@@ -37,15 +38,29 @@ def parse_date(text):
 
 
 def parse_period(text):
-    """Parse a period string like '2025.09.01 - 2026.08.31'."""
+    """Parse a period from a range string or from one or two standalone dates.
+
+    Accepts '2025.09.01 - 2026.08.31' (separators: -, to, 至), a single date
+    like '2025.09.01' (reported for that day only), or two dates in any
+    order, e.g. '2026.09.01 2027.08.31'.
+    """
     match = PERIOD_PATTERN.search(text or "")
-    if not match:
-        raise ValueError(
-            "Period must look like '2025.09.01 - 2026.08.31' "
-            "(separators: -, to, 至)"
-        )
-    start = parse_date(match.group(1))
-    end = parse_date(match.group(2))
+    if match:
+        start = parse_date(match.group(1))
+        end = parse_date(match.group(2))
+    else:
+        tokens = DATE_TOKEN_PATTERN.findall(text or "")
+        try:
+            dates = [parse_date(token) for token in tokens]
+        except ValueError as e:
+            raise ValueError(f"Invalid date in period: {e}")
+        if not dates:
+            raise ValueError(
+                "No date found. Enter a period like '2025.09.01 - 2026.08.31' "
+                "(separators: -, to, 至), a single date like '2025.09.01', "
+                "or two dates like '2025.09.01 2026.08.31'"
+            )
+        start, end = min(dates), max(dates)
     if start > end:
         raise ValueError("Period start date is after the end date")
     return start, end
@@ -208,7 +223,7 @@ def parse_args(argv):
     parser.add_argument("--account", action="append",
                         help="account name(s) to report; default: all accounts with history")
     parser.add_argument("--period",
-                        help="period string, e.g. '2025.09.01 - 2026.08.31'")
+                        help="period string, e.g. '2025.09.01 - 2026.08.31', a single date, or two dates")
     parser.add_argument("--from", dest="from_date", help="period start date, e.g. 2025.09.01")
     parser.add_argument("--to", dest="to_date", help="period end date, e.g. 2026.08.31")
     parser.add_argument("--rows-per-page", type=int, default=10,

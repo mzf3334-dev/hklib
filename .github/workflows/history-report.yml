@@ -4,15 +4,15 @@ on:
   workflow_dispatch: # Run manually from the Actions tab
     inputs:
       period:
-        description: 'Period, e.g. 2025.09.01 - 2026.08.31 (leave blank to use Start/End dates; if all blank = last 12 months)'
+        description: 'Full period, e.g. 2025.09.01 - 2026.08.31 (or just leave blank and use the two date boxes below)'
         required: false
         default: ''
       start_date:
-        description: 'Period start date, e.g. 2025.09.01 (used when Period is blank)'
+        description: 'Period start date, e.g. 2025.09.01 (dates in the three boxes may be in any order)'
         required: false
         default: ''
       end_date:
-        description: 'Period end date, e.g. 2026.08.31 (used when Period is blank)'
+        description: 'Period end date, e.g. 2026.08.31 (a single date alone reports that day only)'
         required: false
         default: ''
       account:
@@ -45,16 +45,14 @@ jobs:
           INPUT_WITH_DATES: ${{ github.event.inputs.with_dates }}
         run: |
           args=()
-          if [ -n "$INPUT_PERIOD" ]; then
-            args+=(--period "$INPUT_PERIOD")
-          elif [ -n "$INPUT_START" ] && [ -n "$INPUT_END" ]; then
-            args+=(--from "$INPUT_START" --to "$INPUT_END")
-          else
+          period_text="${INPUT_PERIOD} ${INPUT_START} ${INPUT_END}"
+          if [ -z "${period_text// /}" ]; then
             START=$(date -d "-1 year" +%Y.%m.%d)
             END=$(date +%Y.%m.%d)
-            echo "No period given, defaulting to $START - $END"
-            args+=(--period "$START - $END")
+            echo "No dates given, defaulting to $START - $END"
+            period_text="$START - $END"
           fi
+          args+=(--period "$period_text")
           if [ -n "$INPUT_ACCOUNT" ]; then
             args+=(--account "$INPUT_ACCOUNT")
           fi
