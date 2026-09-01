@@ -38,6 +38,18 @@ jobs:
           
         run: python hk_library_renew.py
 
+      - name: Upload debug captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-captures-${{ github.run_number }}
+          path: |
+            error_page_*.html
+            error_screenshot_*.png
+            detail_page_*.html
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Commit borrow history
         if: always()
         run: |

@@ -387,16 +387,50 @@ def fetch_call_no(driver, wait, detail_url, username, title):
         print(f"[{username}] Fetching call number from detail page: {title}")
         driver.get(detail_url)
         wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
+        try:
+            WebDriverWait(driver, 8).until(
+                lambda d: d.find_elements(By.XPATH, "//*[contains(text(), '索書號')]")
+            )
+        except Exception:
+            pass
         time.sleep(1)
         value = extract_call_no(driver)
         if value:
             print(f"[{username}] Call number found: {value}")
-        else:
-            print(f"[{username}] Call number not found on detail page")
-        return value
+            return value
+        print(f"[{username}] Call number not found on detail page")
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        debug_file = f"detail_page_{username}_{stamp}.html"
+        try:
+            with open(debug_file, "w", encoding="utf-8") as f:
+                f.write(driver.page_source or "")
+            print(f"[{username}] Saved {debug_file} for call-number debugging")
+        except Exception:
+            pass
+        return ""
     except Exception as e:
         print(f"[{username}] Failed to fetch call number for '{title}': {e}")
         return ""
+
+
+def find_detail_link(element):
+    """Return the first plausible book-detail hyperlink inside an element."""
+    try:
+        anchors = element.find_elements(By.CSS_SELECTOR, "a[href]")
+    except Exception:
+        return ""
+    for anchor in anchors:
+        try:
+            href = (anchor.get_attribute("href") or "").strip()
+        except Exception:
+            continue
+        if not href or href.lower().startswith("javascript"):
+            continue
+        lowered = href.lower()
+        if "logout" in lowered or "renew" in lowered or "patronaccount" in lowered:
+            continue
+        return href
+    return ""
 
 
 def build_book_record(username, row_index, cols, column_indexes, times_renewed_index):
@@ -420,14 +454,14 @@ def build_book_record(username, row_index, cols, column_indexes, times_renewed_i
         title_idx = 1 if len(cols) > 1 else None
     detail_url = ""
     if title_idx is not None:
-        try:
-            for anchor in cols[title_idx].find_elements(By.CSS_SELECTOR, "a[href]"):
-                href = (anchor.get_attribute("href") or "").strip()
-                if href and not href.lower().startswith("javascript"):
-                    detail_url = href
-                    break
-        except Exception:
-            detail_url = ""
+        detail_url = find_detail_link(cols[title_idx])
+    if not detail_url:
+        for col in cols:
+            detail_url = find_detail_link(col)
+            if detail_url:
+                break
+    if detail_url:
+        print(f"[{username}] Row {row_index}: detail link found: {detail_url}")
     due_date = parse_due_date(due_date_str)
     if not due_date:
         print(f"[{username}] Row {row_index}: could not parse due date '{due_date_str}'")
@@ -672,9 +706,13 @@ def process_account(account):
                     current_books.append(book)
 
         for book in current_books:
-            if book["call_no"] or not book.get("detail_url"):
+            if book["call_no"]:
                 continue
-            book["call_no"] = fetch_call_no(driver, wait, book["detail_url"], username, book["title"])
+            detail_url = book.get("detail_url")
+            if not detail_url:
+                print(f"[{username}] No detail link found for '{book['title']}'; call number stays empty")
+                continue
+            book["call_no"] = fetch_call_no(driver, wait, detail_url, username, book["title"])
 
         # Step 12: Record borrow history and send email with borrowed book status
         try:
