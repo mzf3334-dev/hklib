@@ -10,6 +10,8 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+import history_store
+
 def get_config(key, default=None):
     """Get configuration from environment variable"""
     return os.environ.get(key, default)
@@ -130,6 +132,36 @@ def extract_times_renewed(cols, times_renewed_index=None):
     return "Not available"
 
 
+def map_checkout_columns(table):
+    """Map checkout table columns to title/author/call number/due date indexes."""
+    indexes = {"title": 1, "author": None, "call_no": None, "due": 4}
+    try:
+        headers = table.find_elements(By.CSS_SELECTOR, "thead th, tr th")
+        header_texts = [h.text.strip() for h in headers]
+    except Exception as e:
+        print(f"[debug] Could not read table headers: {e}")
+        return indexes
+
+    if not header_texts:
+        print("[debug] No table headers found, using default column indexes")
+        return indexes
+
+    keyword_map = {
+        "title": ("title", "書名"),
+        "author": ("author", "作者"),
+        "call_no": ("call", "索書號", "source", "電子"),
+        "due": ("due", "到期"),
+    }
+    for field, keywords in keyword_map.items():
+        for idx, header in enumerate(header_texts):
+            lowered = header.lower()
+            if header and any(keyword.lower() in lowered for keyword in keywords):
+                indexes[field] = idx
+                break
+    print(f"[debug] Checkout column mapping: {indexes} from headers {header_texts}")
+    return indexes
+
+
 def find_renew_button(driver, wait):
     """Find the renew button using multiple selector strategies."""
     selectors = [
@@ -183,6 +215,53 @@ def get_checkout_table(driver, username):
                 raise RuntimeError(f"Checkout table not found after {attempt} attempts: {type(e).__name__}")
 
     raise RuntimeError("Checkout table not found")
+
+
+def build_book_record(username, row_index, cols, column_indexes, times_renewed_index):
+    """Parse one checkout row into a detailed book record.
+
+    Returns None when the row has no parseable due date.
+    """
+    raw_cells = [col.text.strip() for col in cols]
+
+    def cell_text(key):
+        idx = column_indexes.get(key)
+        if idx is not None and 0 <= idx < len(raw_cells):
+            return raw_cells[idx]
+        return ""
+
+    title_cell = cell_text("title") or (raw_cells[1] if len(raw_cells) > 1 else "")
+    due_date_str = cell_text("due") or (raw_cells[4] if len(raw_cells) > 4 else "")
+    due_date = parse_due_date(due_date_str)
+    if not due_date:
+        print(f"[{username}] Row {row_index}: could not parse due date '{due_date_str}'")
+        return None
+
+    times_renewed = extract_times_renewed(cols, times_renewed_index)
+    author = cell_text("author")
+    if author:
+        history_title = title_cell
+    else:
+        history_title, author = history_store.parse_author_from_title(title_cell)
+
+    call_no = cell_text("call_no")
+    if not call_no:
+        skip = {title_cell, author, due_date_str}
+        if raw_cells:
+            skip.add(raw_cells[0])
+        call_no = history_store.guess_call_no(raw_cells, skip)
+
+    print(f"[{username}] Row {row_index}: title='{title_cell}', author='{author}', "
+          f"call_no='{call_no}', due={due_date_str}, times_renewed='{times_renewed}'")
+    return {
+        "title": title_cell,
+        "history_title": history_title,
+        "author": author,
+        "call_no": call_no,
+        "due_date": due_date,
+        "due_date_str": due_date_str,
+        "times_renewed": times_renewed,
+    }
 
 
 def send_email(subject, body, receiver_email):
@@ -386,42 +465,58 @@ def process_account(account):
         
         # Re-extract current books after renewal attempt
         rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
-        current_books = {}
+        column_indexes = map_checkout_columns(table)
+        current_books = []
         for row_index, row in enumerate(rows):
             cols = row.find_elements(By.TAG_NAME, "td")
             if len(cols) >= 5:
-                title = cols[1].text.strip()
-                due_date_str = cols[4].text.strip()
-                due_date = parse_due_date(due_date_str)
-                if due_date:
-                    times_renewed = extract_times_renewed(cols, times_renewed_index)
-                    print(f"[{username}] Row {row_index}: title='{title}', due={due_date_str}, times_renewed='{times_renewed}'")
-                    current_books[title] = {
-                        "due_date": due_date,
-                        "times_renewed": times_renewed
-                    }
-                else:
-                    print(f"[{username}] Row {row_index}: could not parse due date '{due_date_str}'")
-        
-        # Step 12: Send email with borrowed book status
+                book = build_book_record(username, row_index, cols, column_indexes, times_renewed_index)
+                if book:
+                    current_books.append(book)
+
+        # Step 12: Record borrow history and send email with borrowed book status
+        try:
+            history_books = [
+                {"title": book["history_title"], "author": book["author"], "call_no": book["call_no"]}
+                for book in current_books
+            ]
+            _, new_books = history_store.update_history(username, history_books)
+        except Exception as e:
+            print(f"[{username}] Failed to update borrow history: {e}")
+            new_books = []
+
         if current_books:
             email_body = f"Library Book Renewal Status for {username}\n\n"
             email_body += f"Total borrowed books: {len(current_books)}\n\n"
             email_body += "Your currently borrowed books:\n\n"
-            for title, book_status in current_books.items():
-                current_due_date = book_status["due_date"]
-                email_body += f"Title: {title}\n"
-                email_body += f"Due Date: {current_due_date.strftime('%Y-%m-%d')}\n"
-                email_body += f"Times Renewed: {book_status['times_renewed']}\n"
-                original_book = next((book for book in near_due_books if book['title'] == title), None)
+            for book in current_books:
+                email_body += f"Title: {book['title']}\n"
+                if book["author"]:
+                    email_body += f"Author: {book['author']}\n"
+                if book["call_no"]:
+                    email_body += f"Call No.: {book['call_no']}\n"
+                email_body += f"Due Date: {book['due_date'].strftime('%Y-%m-%d')}\n"
+                email_body += f"Times Renewed: {book['times_renewed']}\n"
+                original_book = next((b for b in near_due_books if b['title'] == book['title']), None)
                 if original_book:
-                    if current_due_date > original_book['due_date']:
+                    if book['due_date'] > original_book['due_date']:
                         email_body += "Renewal successful\n"
                     else:
                         email_body += "Renewal failed\n"
                 email_body += "\n"
         else:
             email_body = f"Account {username}: You have no borrowed books."
+
+        if new_books:
+            email_body += f"New books recorded in borrow history ({len(new_books)}):\n"
+            for book in new_books:
+                line = f"- {book['title']}"
+                if book["author"]:
+                    line += f" / {book['author']}"
+                if book["call_no"]:
+                    line += f" [{book['call_no']}]"
+                email_body += line + "\n"
+            email_body += "\n"
 
         if renewal_error:
             email_body += f"\nRenewal action error: {renewal_error}\n"

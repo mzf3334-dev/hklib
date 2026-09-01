@@ -1,2 +1,7 @@
 debug/
 job_log.txt
+__pycache__/
+reports/
+error_page_*.html
+error_screenshot_*.png
+hklib.code-workspace
