@@ -55,7 +55,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add history/
+          git add history/ 2>/dev/null || echo "No history files yet"
           if git diff --cached --quiet; then
             echo "No borrow history changes to commit"
           else
