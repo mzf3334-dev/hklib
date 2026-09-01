@@ -1,0 +1,79 @@
+name: Borrowed History Report
+
+on:
+  workflow_dispatch: # Run manually from the Actions tab
+    inputs:
+      period:
+        description: 'Period, e.g. 2025.09.01 - 2026.08.31 (leave blank to use Start/End dates; if all blank = last 12 months)'
+        required: false
+        default: ''
+      start_date:
+        description: 'Period start date, e.g. 2025.09.01 (used when Period is blank)'
+        required: false
+        default: ''
+      end_date:
+        description: 'Period end date, e.g. 2026.08.31 (used when Period is blank)'
+        required: false
+        default: ''
+      account:
+        description: 'Library card number to report (leave blank for all accounts)'
+        required: false
+        default: ''
+      with_dates:
+        description: 'Add Borrowed-Returned date column: true or false'
+        required: false
+        default: 'false'
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Generate borrowed history report
+        env:
+          INPUT_PERIOD: ${{ github.event.inputs.period }}
+          INPUT_START: ${{ github.event.inputs.start_date }}
+          INPUT_END: ${{ github.event.inputs.end_date }}
+          INPUT_ACCOUNT: ${{ github.event.inputs.account }}
+          INPUT_WITH_DATES: ${{ github.event.inputs.with_dates }}
+        run: |
+          args=()
+          if [ -n "$INPUT_PERIOD" ]; then
+            args+=(--period "$INPUT_PERIOD")
+          elif [ -n "$INPUT_START" ] && [ -n "$INPUT_END" ]; then
+            args+=(--from "$INPUT_START" --to "$INPUT_END")
+          else
+            START=$(date -d "-1 year" +%Y.%m.%d)
+            END=$(date +%Y.%m.%d)
+            echo "No period given, defaulting to $START - $END"
+            args+=(--period "$START - $END")
+          fi
+          if [ -n "$INPUT_ACCOUNT" ]; then
+            args+=(--account "$INPUT_ACCOUNT")
+          fi
+          if [ "$INPUT_WITH_DATES" = "true" ]; then
+            args+=(--with-dates)
+          fi
+          python history_report.py "${args[@]}"
+
+      - name: Upload report for download
+        uses: actions/upload-artifact@v4
+        with:
+          name: borrowed-history-report-${{ github.run_number }}
+          path: reports/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## Borrowed History Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Download **borrowed-history-report-${{ github.run_number }}** from the **Artifacts** section of this run page, unzip it, open the HTML file in a browser and print to A4 (Ctrl+P / Cmd+P)." >> "$GITHUB_STEP_SUMMARY"

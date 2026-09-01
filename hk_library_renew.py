@@ -480,10 +480,9 @@ def process_account(account):
                 {"title": book["history_title"], "author": book["author"], "call_no": book["call_no"]}
                 for book in current_books
             ]
-            _, new_books = history_store.update_history(username, history_books)
+            history_store.update_history(username, history_books)
         except Exception as e:
             print(f"[{username}] Failed to update borrow history: {e}")
-            new_books = []
 
         if current_books:
             email_body = f"Library Book Renewal Status for {username}\n\n"
@@ -506,17 +505,6 @@ def process_account(account):
                 email_body += "\n"
         else:
             email_body = f"Account {username}: You have no borrowed books."
-
-        if new_books:
-            email_body += f"New books recorded in borrow history ({len(new_books)}):\n"
-            for book in new_books:
-                line = f"- {book['title']}"
-                if book["author"]:
-                    line += f" / {book['author']}"
-                if book["call_no"]:
-                    line += f" [{book['call_no']}]"
-                email_body += line + "\n"
-            email_body += "\n"
 
         if renewal_error:
             email_body += f"\nRenewal action error: {renewal_error}\n"
