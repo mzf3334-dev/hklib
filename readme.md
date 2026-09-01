@@ -99,11 +99,22 @@ The script keeps a borrowing history for each library account so past loans are 
 
 History files are committed back to the repository automatically after each GitHub Actions run, so the history survives between scheduled runs.
 
+### Card Number Privacy
+
+The repository is public, so card numbers are **masked everywhere** they could be seen by others:
+
+- History file names use a masked id (e.g. `masked8445.json`), and the `account` field inside the JSON stores the masked id too.
+- All workflow log output shows the masked id instead of the card number (e.g. `[masked8445]`).
+- Debug dumps (`error_page_*.html`, `detail_page_*.html`) use masked file names.
+- Reports published to GitHub Pages and artifacts show `****8445`.
+
+Note: history files committed **before** this masking was introduced may still be visible in older commits. To remove them completely, the git history would need to be rewritten (e.g. with `git filter-repo`) and force-pushed.
+
 ### History file format
 
 ```json
 {
-  "account": "LIB_USERNAME",
+  "account": "masked8445",
   "records": [
     {
       "title": "The Hobbit",
@@ -152,6 +163,7 @@ All layout values can be adjusted:
 | `--font-size` | 9 | Data font size in pt |
 | `--with-dates` | off | Adds a Borrowed/Returned date column |
 | `--mask-account` | off | Mask card numbers (e.g. `****8445`) in output and filenames |
+| `--open` | off | Open the generated report in the browser automatically |
 | `--no-empty-rows` | off | Do not pad the last page with empty rows |
 | `--output` | reports | Output directory |
 | `--history-dir` | history | Directory containing history files |
@@ -182,6 +194,16 @@ The URL is `https://<owner>.github.io/<repo>/` (for example `https://mzf3334-dev
 One-time setup: go to **Settings → Pages → Build and deployment → Source** and select **GitHub Actions**. Until this is done, the deploy step is skipped with a warning in the run summary.
 
 Published pages mask card numbers (e.g. `****8445`) because the site is publicly accessible.
+
+### Getting Notified When a Report Is Ready
+
+- When a report workflow finishes, an email is sent to `EMAIL_RECEIVER` with a clickable link to the published page (uses the same Gmail settings as the renewal notifications).
+- The Pages URL is **stable** — bookmark it once (`https://<owner>.github.io/<repo>/`) and it always shows the report from the latest run.
+- Locally, add `--open` to `history_report.py` to open the freshly generated report in your browser automatically:
+
+```bash
+python history_report.py --period "2025.09.01 - 2026.08.31" --open
+```
 
 ## Notification Email
 After each run, the script sends an email summarizing your borrowed books. Each book entry includes:

@@ -192,13 +192,13 @@ def find_renew_button(driver, wait):
     ))
 
 
-def get_checkout_table(driver, username):
+def get_checkout_table(driver, log_name):
     """Locate the checkout table, refreshing if the page shows an internal error."""
     short_wait = WebDriverWait(driver, 10)
     for attempt in range(1, 4):
         try:
             if "Internal Error" in driver.title:
-                print(f"[{username}] Account page shows internal error (attempt {attempt}), refreshing...")
+                print(f"[{log_name}] Account page shows internal error (attempt {attempt}), refreshing...")
                 driver.refresh()
                 time.sleep(3)
                 continue
@@ -206,13 +206,13 @@ def get_checkout_table(driver, username):
             table = short_wait.until(EC.presence_of_element_located((By.ID, "checkout")))
             return table
         except Exception as e:
-            print(f"[{username}] Checkout table not ready (attempt {attempt}): {type(e).__name__}")
+            print(f"[{log_name}] Checkout table not ready (attempt {attempt}): {type(e).__name__}")
             if attempt < 3:
                 try:
                     driver.refresh()
                     time.sleep(3)
                 except Exception as refresh_err:
-                    print(f"[{username}] Refresh failed: {refresh_err}")
+                    print(f"[{log_name}] Refresh failed: {refresh_err}")
                     raise
             else:
                 raise RuntimeError(f"Checkout table not found after {attempt} attempts: {type(e).__name__}")
@@ -381,10 +381,10 @@ def extract_call_no(driver):
     return ""
 
 
-def fetch_call_no(driver, wait, detail_url, username, title):
+def fetch_call_no(driver, wait, detail_url, log_name, title):
     """Open a book's detail page and extract its call number (索書號)."""
     try:
-        print(f"[{username}] Fetching call number from detail page: {title}")
+        print(f"[{log_name}] Fetching call number from detail page: {title}")
         driver.get(detail_url)
         wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
         try:
@@ -396,20 +396,20 @@ def fetch_call_no(driver, wait, detail_url, username, title):
         time.sleep(1)
         value = extract_call_no(driver)
         if value:
-            print(f"[{username}] Call number found: {value}")
+            print(f"[{log_name}] Call number found: {value}")
             return value
-        print(f"[{username}] Call number not found on detail page")
+        print(f"[{log_name}] Call number not found on detail page")
         stamp = time.strftime("%Y%m%d-%H%M%S")
         debug_file = f"detail_page_{username}_{stamp}.html"
         try:
             with open(debug_file, "w", encoding="utf-8") as f:
                 f.write(driver.page_source or "")
-            print(f"[{username}] Saved {debug_file} for call-number debugging")
+            print(f"[{log_name}] Saved {debug_file} for call-number debugging")
         except Exception:
             pass
         return ""
     except Exception as e:
-        print(f"[{username}] Failed to fetch call number for '{title}': {e}")
+        print(f"[{log_name}] Failed to fetch call number for '{title}': {e}")
         return ""
 
 
@@ -433,7 +433,7 @@ def find_detail_link(element):
     return ""
 
 
-def build_book_record(username, row_index, cols, column_indexes, times_renewed_index):
+def build_book_record(log_name, row_index, cols, column_indexes, times_renewed_index):
     """Parse one checkout row into a detailed book record.
 
     Returns None when the row has no parseable due date.
@@ -461,10 +461,10 @@ def build_book_record(username, row_index, cols, column_indexes, times_renewed_i
             if detail_url:
                 break
     if detail_url:
-        print(f"[{username}] Row {row_index}: detail link found: {detail_url}")
+        print(f"[{log_name}] Row {row_index}: detail link found: {detail_url}")
     due_date = parse_due_date(due_date_str)
     if not due_date:
-        print(f"[{username}] Row {row_index}: could not parse due date '{due_date_str}'")
+        print(f"[{log_name}] Row {row_index}: could not parse due date '{due_date_str}'")
         return None
 
     times_renewed = extract_times_renewed(cols, times_renewed_index)
@@ -481,7 +481,7 @@ def build_book_record(username, row_index, cols, column_indexes, times_renewed_i
             skip.add(raw_cells[0])
         call_no = history_store.guess_call_no(raw_cells, skip)
 
-    print(f"[{username}] Row {row_index}: title='{title_cell}', author='{author}', "
+    print(f"[{log_name}] Row {row_index}: title='{title_cell}', author='{author}', "
           f"call_no='{call_no}', due={due_date_str}, times_renewed='{times_renewed}'")
     return {
         "title": title_cell,
@@ -524,11 +524,12 @@ def send_email(subject, body, receiver_email):
 def process_account(account):
     """Process renewal for a single library account. Returns True on success, False on failure."""
     username = account["username"]
+    log_name = history_store.masked_name(username)
     password = account["password"]
     email_receiver = account.get("email_receiver")
     
     print(f"\n{'='*60}")
-    print(f"Processing account: {username}")
+    print(f"Processing account: {log_name}")
     print(f"{'='*60}")
     
     driver = create_driver()
@@ -537,7 +538,7 @@ def process_account(account):
     try:
         # Step 1: Navigate to English login page
         driver.get("https://www.hkpl.gov.hk/en/login.html")
-        print(f"[{username}] Step 1: Login page loaded")
+        print(f"[{log_name}] Step 1: Login page loaded")
 
         # Step 2: Enter credentials and submit
         username_field = wait.until(EC.presence_of_element_located((By.NAME, "USER")))
@@ -548,30 +549,30 @@ def process_account(account):
         password_field.clear()
         password_field.send_keys(password)
         password_field.submit()
-        print(f"[{username}] Step 2: Credentials submitted")
+        print(f"[{log_name}] Step 2: Credentials submitted")
 
         # Step 3: Wait until we have left the login page
         wait.until(lambda d: "login.html" not in d.current_url)
-        print(f"[{username}] Step 3: Login successful - current URL: {driver.current_url}")
+        print(f"[{log_name}] Step 3: Login successful - current URL: {driver.current_url}")
         
         # Step 4: Handle popup and overlay
         try:
             overlay = driver.find_element(By.ID, "isd-overlay")
             driver.execute_script("arguments[0].remove();", overlay)
-            print(f"[{username}] Step 4: Removed overlay with JavaScript")
+            print(f"[{log_name}] Step 4: Removed overlay with JavaScript")
         except:
-            print(f"[{username}] Step 4: No overlay found")
+            print(f"[{log_name}] Step 4: No overlay found")
 
         # Step 5: Get the current window handle (original tab)
         original_window = driver.current_window_handle
-        print(f"[{username}] Original window handle: {original_window}")
+        print(f"[{log_name}] Original window handle: {original_window}")
         
         # Step 6: Click the "Go" button which opens a new tab
         go_link = wait.until(EC.element_to_be_clickable(
             (By.CSS_SELECTOR, "a.ac_logout_btn")
         ))
         go_link.click()
-        print(f"[{username}] Step 5: Clicked Go button - new tab should open")
+        print(f"[{log_name}] Step 5: Clicked Go button - new tab should open")
         
         # Step 7: Wait for the new tab to open and switch to it
         WebDriverWait(driver, 10).until(EC.number_of_windows_to_be(2))
@@ -579,28 +580,28 @@ def process_account(account):
         for window_handle in driver.window_handles:
             if window_handle != original_window:
                 driver.switch_to.window(window_handle)
-                print(f"[{username}] Step 6: Switched to new window: {window_handle}")
+                print(f"[{log_name}] Step 6: Switched to new window: {window_handle}")
                 break
         
         # Step 8: Wait for the account page to load in the new tab
         wait.until(EC.url_contains("PatronAccountPage"))
-        print(f"[{username}] Step 7: Account page loaded: {driver.current_url}")
+        print(f"[{log_name}] Step 7: Account page loaded: {driver.current_url}")
 
         # Wait for the page to finish rendering
         wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
         time.sleep(2)
 
         # Step 9: Extract borrowed books and identify near-due items
-        print(f"[{username}] Step 8: Extracting borrowed books...")
+        print(f"[{log_name}] Step 8: Extracting borrowed books...")
 
-        table = get_checkout_table(driver, username)
-        print(f"[{username}] Found checkout table")
+        table = get_checkout_table(driver, log_name)
+        print(f"[{log_name}] Found checkout table")
 
         times_renewed_index = extract_column_index_by_header(table, "Times Renewed", "Renewed", "續借")
         if times_renewed_index is not None:
-            print(f"[{username}] 'Times Renewed' column index: {times_renewed_index}")
+            print(f"[{log_name}] 'Times Renewed' column index: {times_renewed_index}")
         else:
-            print(f"[{username}] 'Times Renewed' header not found, will scan row cells")
+            print(f"[{log_name}] 'Times Renewed' header not found, will scan row cells")
 
         rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
         today = datetime.now()
@@ -610,7 +611,7 @@ def process_account(account):
         renewal_error = None
         
         if rows:
-            print(f"\n[{username}] Your Borrowed Books:")
+            print(f"\n[{log_name}] Your Borrowed Books:")
             print("=" * 50)
             for row_index, row in enumerate(rows):
                 cols = row.find_elements(By.TAG_NAME, "td")
@@ -652,14 +653,14 @@ def process_account(account):
                         print(f"Title: {title}")
                         print(f"Due Date: {due_date_str} (format not recognized)")
                         print("-" * 50)
-            print(f"[{username}] Total books: {len(borrowed_books)}")
-            print(f"[{username}] Books near due: {len(near_due_books)}")
+            print(f"[{log_name}] Total books: {len(borrowed_books)}")
+            print(f"[{log_name}] Books near due: {len(near_due_books)}")
         else:
-            print(f"[{username}] No borrowed books found")
+            print(f"[{log_name}] No borrowed books found")
         
         # Step 10: Select near-due books for renewal
         if renewable_books:
-            print(f"\n[{username}] Selecting near-due books for renewal...")
+            print(f"\n[{log_name}] Selecting near-due books for renewal...")
             try:
                 selected_count = 0
                 for book in renewable_books:
@@ -671,7 +672,7 @@ def process_account(account):
                         if checkbox.is_displayed() and checkbox.is_enabled():
                             if not checkbox.is_selected():
                                 checkbox.click()
-                                print(f"[{username}] Selected: {book['title']}")
+                                print(f"[{log_name}] Selected: {book['title']}")
                             selected_count += 1
 
                 if selected_count:
@@ -679,20 +680,20 @@ def process_account(account):
                     try:
                         renew_button.click()
                     except Exception as click_err:
-                        print(f"[{username}] Normal click failed ({click_err}), trying JavaScript click")
+                        print(f"[{log_name}] Normal click failed ({click_err}), trying JavaScript click")
                         driver.execute_script("arguments[0].click();", renew_button)
-                    print(f"[{username}] Clicked renew button")
+                    print(f"[{log_name}] Clicked renew button")
                     time.sleep(5)  # Wait for renewal processing to complete
-                    print(f"[{username}] Renewal processing completed")
+                    print(f"[{log_name}] Renewal processing completed")
                 else:
-                    print(f"[{username}] No selectable near-due books found")
+                    print(f"[{log_name}] No selectable near-due books found")
             except Exception as e:
                 renewal_error = f"{type(e).__name__}: {str(e) or 'no additional details'}"
-                print(f"[{username}] Error during renewal: {renewal_error}")
+                print(f"[{log_name}] Error during renewal: {renewal_error}")
         elif near_due_books:
-            print(f"[{username}] No near-due books are eligible for renewal")
+            print(f"[{log_name}] No near-due books are eligible for renewal")
         else:
-            print(f"[{username}] No near-due books to renew")
+            print(f"[{log_name}] No near-due books to renew")
         
         # Re-extract current books after renewal attempt
         rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
@@ -701,7 +702,7 @@ def process_account(account):
         for row_index, row in enumerate(rows):
             cols = row.find_elements(By.TAG_NAME, "td")
             if len(cols) >= 5:
-                book = build_book_record(username, row_index, cols, column_indexes, times_renewed_index)
+                book = build_book_record(log_name, row_index, cols, column_indexes, times_renewed_index)
                 if book:
                     current_books.append(book)
 
@@ -710,9 +711,9 @@ def process_account(account):
                 continue
             detail_url = book.get("detail_url")
             if not detail_url:
-                print(f"[{username}] No detail link found for '{book['title']}'; call number stays empty")
+                print(f"[{log_name}] No detail link found for '{book['title']}'; call number stays empty")
                 continue
-            book["call_no"] = fetch_call_no(driver, wait, detail_url, username, book["title"])
+            book["call_no"] = fetch_call_no(driver, wait, detail_url, log_name, book["title"])
 
         # Step 12: Record borrow history and send email with borrowed book status
         try:
@@ -722,7 +723,7 @@ def process_account(account):
             ]
             history_store.update_history(username, history_books)
         except Exception as e:
-            print(f"[{username}] Failed to update borrow history: {e}")
+            print(f"[{log_name}] Failed to update borrow history: {e}")
 
         if current_books:
             email_body = f"Library Book Renewal Status for {username}\n\n"
@@ -750,23 +751,23 @@ def process_account(account):
             email_body += f"\nRenewal action error: {renewal_error}\n"
         
         send_email("Library Book Renewal Status", email_body, email_receiver)
-        print(f"[{username}] Account processing completed successfully")
+        print(f"[{log_name}] Account processing completed successfully")
         return True
 
     except Exception as e:
-        print(f"\n[{username}] ❌ An error occurred: {str(e)}")
-        print(f"[{username}] Current URL: {driver.current_url}")
-        print(f"[{username}] Page title: {driver.title}")
+        print(f"\n[{log_name}] ❌ An error occurred: {str(e)}")
+        print(f"[{log_name}] Current URL: {driver.current_url}")
+        print(f"[{log_name}] Page title: {driver.title}")
         timestamp = time.strftime("%Y%m%d-%H%M%S")
-        with open(f"error_page_{username}_{timestamp}.html", "w", encoding="utf-8") as f:
+        with open(f"error_page_{log_name}_{timestamp}.html", "w", encoding="utf-8") as f:
             f.write(driver.page_source)
-        driver.save_screenshot(f"error_screenshot_{username}_{timestamp}.png")
-        print(f"[{username}] Saved error_page_{username}_{timestamp}.html and error_screenshot_{username}_{timestamp}.png")
+        driver.save_screenshot(f"error_screenshot_{log_name}_{timestamp}.png")
+        print(f"[{log_name}] Saved error_page_{log_name}_{timestamp}.html and error_screenshot_{log_name}_{timestamp}.png")
         return False
 
     finally:
         driver.quit()
-        print(f"[{username}] Browser closed")
+        print(f"[{log_name}] Browser closed")
 
 # Main execution
 if __name__ == "__main__":

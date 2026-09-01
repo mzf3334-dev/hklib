@@ -22,14 +22,30 @@ EBOOK_SOURCES = [
 ]
 
 
+def masked_name(username):
+    """Mask an account id for public display and file naming.
+
+    Only the last 4 characters are kept (e.g. 22222017768445 -> masked8445).
+    Masked names are stable: masking an already-masked name is a no-op.
+    """
+    name = username or ""
+    if name.startswith("masked"):
+        return name
+    return f"masked{name[-4:]}" if len(name) > 4 else "masked"
+
+
 def get_history_dir():
     """Return the directory where history files are stored."""
     return HISTORY_DIR
 
 
 def history_path(username):
-    """Return the history file path for an account."""
-    safe = re.sub(r"[^A-Za-z0-9._-]", "_", username)
+    """Return the history file path for an account.
+
+    The file name uses the masked account id so card numbers never appear
+    in the public repository.
+    """
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", masked_name(username))
     return os.path.join(HISTORY_DIR, f"{safe}.json")
 
 
@@ -88,21 +104,23 @@ def load_history(username):
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict) or not isinstance(data.get("records"), list):
-            return {"account": username, "records": []}
-        data.setdefault("account", username)
+            return {"account": masked_name(username), "records": []}
+        data.setdefault("account", masked_name(username))
         return data
     except (OSError, ValueError) as e:
         print(f"[history] Could not read {path}: {e}; starting fresh")
-        return {"account": username, "records": []}
+        return {"account": masked_name(username), "records": []}
 
 
 def save_history(username, history):
-    """Save history for an account atomically."""
+    """Save history for an account atomically, storing the account id masked."""
     os.makedirs(HISTORY_DIR, exist_ok=True)
     path = history_path(username)
+    payload = dict(history)
+    payload["account"] = masked_name(username)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
+        json.dump(payload, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
     print(f"[history] Saved {len(history['records'])} record(s) to {path}")
 

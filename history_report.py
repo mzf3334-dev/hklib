@@ -15,6 +15,7 @@ import html
 import os
 import re
 import sys
+import webbrowser
 from datetime import date, datetime
 
 import history_store
@@ -240,7 +241,7 @@ def generate_reports(accounts, start, end, options):
         history = history_store.load_history(account)
         records = select_records(history, start, end)
         if not records:
-            print(f"[{account}] No borrowed records in {start} - {end}")
+            print(f"[{display_account(account, options)}] No borrowed records in {start} - {end}")
             continue
         html_text = build_html(account, records, start, end, options)
         filename = (
@@ -251,7 +252,7 @@ def generate_reports(accounts, start, end, options):
         with open(path, "w", encoding="utf-8") as f:
             f.write(html_text)
         pages = (len(records) + options.rows_per_page - 1) // options.rows_per_page
-        print(f"[{account}] {len(records)} book(s), {pages} page(s) -> {path}")
+        print(f"[{display_account(account, options)}] {len(records)} book(s), {pages} page(s) -> {path}")
         written.append(path)
         entries.append((display_account(account, options), filename, len(records)))
 
@@ -288,6 +289,8 @@ def parse_args(argv):
                         help="add a Borrowed-Returned date column")
     parser.add_argument("--mask-account", action="store_true",
                         help="mask account/card numbers (e.g. ****1234) in output and filenames")
+    parser.add_argument("--open", action="store_true",
+                        help="open the generated report in the default browser")
     parser.add_argument("--no-empty-rows", action="store_true",
                         help="do not pad the last page with empty rows")
     parser.add_argument("--output", default="reports",
@@ -333,6 +336,11 @@ def main(argv=None):
     if not written:
         print("No records found for the selected period; no report generated.")
         return 1
+    if options.open:
+        index_path = os.path.join(options.output, "index.html")
+        target = index_path if os.path.exists(index_path) else written[0]
+        webbrowser.open("file://" + os.path.abspath(target))
+        print(f"Opened {target} in your browser")
     print("Done. Open the HTML file(s) in a browser and print to A4 (Ctrl+P / Cmd+P).")
     return 0
 
