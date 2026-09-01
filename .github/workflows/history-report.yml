@@ -3,26 +3,18 @@ name: Borrowed History Report
 on:
   workflow_dispatch: # Run manually from the Actions tab
     inputs:
-      period:
-        description: 'Full period, e.g. 2025.09.01 - 2026.08.31 (or just leave blank and use the two date boxes below)'
-        required: false
-        default: ''
       start_date:
-        description: 'Period start date, e.g. 2025.09.01 (dates in the three boxes may be in any order)'
+        description: 'Period start date, e.g. 2025.09.01 (leave both dates blank for the last 12 months)'
         required: false
         default: ''
       end_date:
-        description: 'Period end date, e.g. 2026.08.31 (a single date alone reports that day only)'
+        description: 'Period end date, e.g. 2026.08.31'
         required: false
         default: ''
       account:
-        description: 'Library card number to report (leave blank for all accounts)'
+        description: 'Library card number (leave blank to generate the report for all cards)'
         required: false
         default: ''
-      with_dates:
-        description: 'Add Borrowed-Returned date column: true or false'
-        required: false
-        default: 'false'
 
 jobs:
   report:
@@ -38,26 +30,24 @@ jobs:
 
       - name: Generate borrowed history report
         env:
-          INPUT_PERIOD: ${{ github.event.inputs.period }}
           INPUT_START: ${{ github.event.inputs.start_date }}
           INPUT_END: ${{ github.event.inputs.end_date }}
           INPUT_ACCOUNT: ${{ github.event.inputs.account }}
-          INPUT_WITH_DATES: ${{ github.event.inputs.with_dates }}
         run: |
           args=()
-          period_text="${INPUT_PERIOD} ${INPUT_START} ${INPUT_END}"
-          if [ -z "${period_text// /}" ]; then
+          if [ -z "$INPUT_START" ] && [ -z "$INPUT_END" ]; then
             START=$(date -d "-1 year" +%Y.%m.%d)
             END=$(date +%Y.%m.%d)
             echo "No dates given, defaulting to $START - $END"
-            period_text="$START - $END"
+            args+=(--from "$START" --to "$END")
+          elif [ -z "$INPUT_START" ] || [ -z "$INPUT_END" ]; then
+            echo "::error::Fill in BOTH period start and period end dates (or leave both blank for the last 12 months)."
+            exit 1
+          else
+            args+=(--from "$INPUT_START" --to "$INPUT_END")
           fi
-          args+=(--period "$period_text")
           if [ -n "$INPUT_ACCOUNT" ]; then
             args+=(--account "$INPUT_ACCOUNT")
-          fi
-          if [ "$INPUT_WITH_DATES" = "true" ]; then
-            args+=(--with-dates)
           fi
           python history_report.py "${args[@]}"
 

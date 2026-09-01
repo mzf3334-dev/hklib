@@ -159,10 +159,10 @@ All layout values can be adjusted:
 You can generate and download the report without a local setup:
 
 1. Go to the repository's **Actions** tab and select **Borrowed History Report**.
-2. Click **Run workflow** and optionally fill in:
-   - **Period** — e.g. `2025.09.01 - 2026.08.31`. Alternatively put just the start and end dates in the **Start date** / **End date** boxes — the dates in the three boxes may be in any order, and blank boxes are ignored. A single date alone reports that day only. Leave everything blank for the last 12 months.
-   - **Account** — library card number to report on; leave blank for all accounts.
-   - **With dates** — `true` to add a Borrowed/Returned date column.
+2. Click **Run workflow** and fill in:
+   - **Period start date** — e.g. `2025.09.01`.
+   - **Period end date** — e.g. `2026.08.31`. (Leave both dates blank to report on the last 12 months.)
+   - **Library card number** — report for that card only; **leave blank to generate the report for all cards**.
 3. When the run finishes, download **`borrowed-history-report-<run number>`** from the run page's **Artifacts** section.
 4. Unzip, open the HTML file in a browser and print to A4 (Ctrl+P / Cmd+P).
 
