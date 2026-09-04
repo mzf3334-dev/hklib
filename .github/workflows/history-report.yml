@@ -78,15 +78,6 @@ jobs:
         continue-on-error: true
         uses: actions/deploy-pages@v4
 
-      - name: Email report link
-        if: always() && hashFiles('reports/*') != ''
-        env:
-          REPORT_URL: ${{ steps.deployment.outputs.page_url }}
-          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
-          EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
-          GMAIL_PWD: ${{ secrets.GMAIL_PWD }}
-        run: python report_notify.py
-
       - name: Write job summary
         if: always()
         run: |

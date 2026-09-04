@@ -184,9 +184,8 @@ The report uses the borrow history files committed to the repository by the dail
 
 ### Viewing Reports Online (GitHub Pages)
 
-Both workflows also publish the report to GitHub Pages, giving you a direct URL to view the result — no download needed:
+The manual report workflow can publish the report to GitHub Pages, giving you a direct URL to view the result — no download needed:
 
-- **Scheduled renewal run** — automatically publishes a rolling report of the last 12 months for all cards after each daily run.
 - **Manual report run** — publishes the report for the period you entered.
 
 The URL is `https://<owner>.github.io/<repo>/` (for example `https://mzf3334-dev.github.io/hklib/`), shown in the run's summary page once deployment succeeds.
@@ -195,11 +194,7 @@ One-time setup: go to **Settings → Pages → Build and deployment → Source**
 
 Published pages mask card numbers (e.g. `****8445`) because the site is publicly accessible.
 
-### Getting Notified When a Report Is Ready
-
-- When a report workflow finishes, an email is sent to `EMAIL_RECEIVER` with a clickable link to the published page (uses the same Gmail settings as the renewal notifications).
-- The Pages URL is **stable** — bookmark it once (`https://<owner>.github.io/<repo>/`) and it always shows the report from the latest run.
-- Locally, add `--open` to `history_report.py` to open the freshly generated report in your browser automatically:
+The report is not generated automatically by the daily renewal run and no email notification is sent when a report is ready. Generate it on demand from the **Actions** tab. Locally, add `--open` to `history_report.py` to open the freshly generated report in your browser automatically:
 
 ```bash
 python history_report.py --period "2025.09.01 - 2026.08.31" --open
