@@ -683,7 +683,13 @@ def process_account(account):
                         print(f"[{log_name}] Normal click failed ({click_err}), trying JavaScript click")
                         driver.execute_script("arguments[0].click();", renew_button)
                     print(f"[{log_name}] Clicked renew button")
-                    time.sleep(5)  # Wait for renewal processing to complete
+                    try:
+                        WebDriverWait(driver, 15).until(
+                            lambda d: "Renewal Results" in d.title or "PatronAccountPage" in d.current_url
+                        )
+                    except Exception as wait_err:
+                        print(f"[{log_name}] Wait for renewal result timed out: {wait_err}")
+                    time.sleep(2)
                     print(f"[{log_name}] Renewal processing completed")
                 else:
                     print(f"[{log_name}] No selectable near-due books found")
@@ -694,10 +700,34 @@ def process_account(account):
             print(f"[{log_name}] No near-due books are eligible for renewal")
         else:
             print(f"[{log_name}] No near-due books to renew")
-        
-        # Re-extract current books after renewal attempt
-        rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
-        column_indexes = map_checkout_columns(table)
+
+        # Re-extract current books after renewal attempt.
+        # The renewal click navigates to a "Renewal Results" page, which makes
+        # the old checkout-table reference stale. Return to the account page
+        # and re-locate the table fresh before reading the updated book list.
+        try:
+            if "PatronAccountPage" not in driver.current_url:
+                print(f"[{log_name}] Navigating back to account page after renewal")
+                driver.get(
+                    "https://webcat.hkpl.gov.hk/wicket/bookmarkable/"
+                    "com.vtls.chamo.webapp.component.patron.PatronAccountPage"
+                    "?theme=WEB&locale=en"
+                )
+                wait.until(EC.url_contains("PatronAccountPage"))
+                wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
+                time.sleep(2)
+        except Exception as nav_err:
+            print(f"[{log_name}] Could not return to account page: {nav_err}")
+
+        try:
+            table = get_checkout_table(driver, log_name)
+            times_renewed_index = extract_column_index_by_header(table, "Times Renewed", "Renewed", "續借")
+            rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
+            column_indexes = map_checkout_columns(table)
+        except Exception as table_err:
+            print(f"[{log_name}] Could not re-locate checkout table after renewal: {table_err}")
+            rows = []
+            column_indexes = {"title": 1, "author": None, "call_no": None, "due": 4}
         current_books = []
         for row_index, row in enumerate(rows):
             cols = row.find_elements(By.TAG_NAME, "td")
