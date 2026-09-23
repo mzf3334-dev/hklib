@@ -521,6 +521,64 @@ def send_email(subject, body, receiver_email):
     except Exception as e:
         print(f"Failed to send email: {str(e)}")
 
+def is_login_url(url):
+    """Check whether the browser is still on a login page (incl. Siteminder redirects)."""
+    u = (url or "").lower()
+    return "login.html" in u or "/auth/login" in u
+
+
+def perform_login(driver, wait, username, password, log_name):
+    """Log in to HKPL with retries.
+
+    Siteminder sometimes re-presents the login form (redirect chain or slow
+    response), which previously caused a TimeoutException while waiting for
+    the URL to leave the login page. Retry the whole login up to 3 times and
+    re-submit when the form reappears.
+    """
+    last_url = ""
+    for attempt in range(1, 4):
+        try:
+            print(f"[{log_name}] Step 1: Login page loaded (attempt {attempt})")
+            driver.get("https://www.hkpl.gov.hk/en/login.html")
+
+            # Make sure the page (and any Siteminder redirect) has settled
+            # before filling in the form.
+            wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
+
+            username_field = wait.until(EC.presence_of_element_located((By.NAME, "USER")))
+            password_field = wait.until(EC.element_to_be_clickable((By.NAME, "PASSWORD")))
+
+            username_field.clear()
+            username_field.send_keys(username)
+            password_field.clear()
+            password_field.send_keys(password)
+            password_field.submit()
+            print(f"[{log_name}] Step 2: Credentials submitted")
+
+            # Wait until we have left the login page. Give Siteminder time to
+            # finish its redirect chain; if the login form is re-presented,
+            # break out and retry the submission with a fresh page load.
+            time.sleep(3)
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                last_url = driver.current_url
+                if not is_login_url(last_url):
+                    print(f"[{log_name}] Step 3: Login successful - current URL: {last_url}")
+                    return
+                if driver.find_elements(By.NAME, "USER"):
+                    print(f"[{log_name}] Login form re-presented, retrying submission")
+                    break
+                time.sleep(1)
+        except Exception as e:
+            print(f"[{log_name}] Login attempt {attempt} failed: "
+                  f"{type(e).__name__}: {str(e) or 'no additional details'}")
+        time.sleep(2)
+
+    raise RuntimeError(
+        f"Login failed after 3 attempts - still on login page: {last_url}"
+    )
+
+
 def process_account(account):
     """Process renewal for a single library account. Returns True on success, False on failure."""
     username = account["username"]
@@ -536,25 +594,10 @@ def process_account(account):
     wait = WebDriverWait(driver, 25)
     
     try:
-        # Step 1: Navigate to English login page
-        driver.get("https://www.hkpl.gov.hk/en/login.html")
-        print(f"[{log_name}] Step 1: Login page loaded")
+        # Steps 1-3: Navigate to login page, submit credentials and wait for
+        # the login to complete (with retries for Siteminder redirects).
+        perform_login(driver, wait, username, password, log_name)
 
-        # Step 2: Enter credentials and submit
-        username_field = wait.until(EC.presence_of_element_located((By.NAME, "USER")))
-        password_field = wait.until(EC.element_to_be_clickable((By.NAME, "PASSWORD")))
-
-        username_field.clear()
-        username_field.send_keys(username)
-        password_field.clear()
-        password_field.send_keys(password)
-        password_field.submit()
-        print(f"[{log_name}] Step 2: Credentials submitted")
-
-        # Step 3: Wait until we have left the login page
-        wait.until(lambda d: "login.html" not in d.current_url)
-        print(f"[{log_name}] Step 3: Login successful - current URL: {driver.current_url}")
-        
         # Step 4: Handle popup and overlay
         try:
             overlay = driver.find_element(By.ID, "isd-overlay")
@@ -785,14 +828,17 @@ def process_account(account):
         return True
 
     except Exception as e:
-        print(f"\n[{log_name}] ❌ An error occurred: {str(e)}")
-        print(f"[{log_name}] Current URL: {driver.current_url}")
-        print(f"[{log_name}] Page title: {driver.title}")
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        with open(f"error_page_{log_name}_{timestamp}.html", "w", encoding="utf-8") as f:
-            f.write(driver.page_source)
-        driver.save_screenshot(f"error_screenshot_{log_name}_{timestamp}.png")
-        print(f"[{log_name}] Saved error_page_{log_name}_{timestamp}.html and error_screenshot_{log_name}_{timestamp}.png")
+        print(f"\n[{log_name}] ❌ An error occurred: {type(e).__name__}: {str(e) or 'no additional details'}")
+        try:
+            print(f"[{log_name}] Current URL: {driver.current_url}")
+            print(f"[{log_name}] Page title: {driver.title}")
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            with open(f"error_page_{log_name}_{timestamp}.html", "w", encoding="utf-8") as f:
+                f.write(driver.page_source)
+            driver.save_screenshot(f"error_screenshot_{log_name}_{timestamp}.png")
+            print(f"[{log_name}] Saved error_page_{log_name}_{timestamp}.html and error_screenshot_{log_name}_{timestamp}.png")
+        except Exception as capture_err:
+            print(f"[{log_name}] Could not capture error page details: {capture_err}")
         return False
 
     finally:
@@ -810,7 +856,11 @@ if __name__ == "__main__":
     print(f"Found {len(accounts)} account(s) to process")
     
     failed = False
-    for account in accounts:
+    for idx, account in enumerate(accounts):
+        if idx > 0:
+            # Small pause between accounts to avoid triggering rate limiting
+            # or bot detection on consecutive logins.
+            time.sleep(5)
         if not process_account(account):
             failed = True
     
