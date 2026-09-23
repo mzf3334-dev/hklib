@@ -40,7 +40,8 @@ def get_accounts():
         accounts.append({
             "username": username,
             "password": password,
-            "email_receiver": email_receiver
+            "email_receiver": email_receiver,
+            "secret_hint": "LIB_USERNAME/LIB_PASSWORD"
         })
     
     # Check for additional accounts (2, 3, 4, ...)
@@ -52,7 +53,8 @@ def get_accounts():
             accounts.append({
                 "username": username,
                 "password": password,
-                "email_receiver": email_receiver
+                "email_receiver": email_receiver,
+                "secret_hint": f"LIB_USERNAME{i}/LIB_PASSWORD{i}"
             })
     
     return accounts
@@ -527,15 +529,103 @@ def is_login_url(url):
     return "login.html" in u or "/auth/login" in u
 
 
-def perform_login(driver, wait, username, password, log_name):
-    """Log in to HKPL with retries.
+class LoginRejectedError(RuntimeError):
+    """Raised when the library site explicitly rejects the submitted credentials."""
 
-    Siteminder sometimes re-presents the login form (redirect chain or slow
-    response), which previously caused a TimeoutException while waiting for
-    the URL to leave the login page. Retry the whole login up to 3 times and
-    re-submit when the form reappears.
+
+def get_login_error(driver):
+    """Return the visible login error text shown by the site, or ''.
+
+    The HKPL login page displays errors such as
+    "[ERR-SSO-0001] Invalid username and/or password" in .login_err.
+    """
+    try:
+        elements = driver.find_elements(By.CSS_SELECTOR, ".login_err, .valid_err")
+    except Exception:
+        return ""
+    for element in elements:
+        try:
+            if element.is_displayed() and element.text.strip():
+                return " ".join(element.text.split())
+        except Exception:
+            continue
+    return ""
+
+
+def get_password_notice(driver):
+    """Return the visible password reminder dialog text, or ''."""
+    try:
+        dialogs = driver.find_elements(By.CSS_SELECTOR, "div.ui-dialog")
+    except Exception:
+        return ""
+    for dialog in dialogs:
+        try:
+            if not dialog.is_displayed():
+                continue
+            text = " ".join(dialog.text.split())
+        except Exception:
+            continue
+        lowered = text.lower()
+        if "password" in lowered and ("expire" in lowered or "not be reused" in lowered):
+            return text[:500]
+    return ""
+
+
+def dismiss_password_expiry_dialog(driver, log_name):
+    """Dismiss the library's "Reminder: Change Your Password" dialog, if shown.
+
+    When the account password is within ~14 days of expiry, HKPL shows this
+    dialog after login and blocks the flow until a button is clicked. Clicking
+    "Continue to Log in and Change the Password Later" lets the session
+    proceed; the reminder text is returned so it can be reported to the user.
+    """
+    notice = get_password_notice(driver)
+    if not notice:
+        return ""
+    xpaths = [
+        "//div[contains(@class, 'ui-dialog')]//button[contains(translate(normalize-space(.), "
+        "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'continue to log in')]",
+        "//button[contains(translate(normalize-space(.), "
+        "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'continue to log in')]",
+    ]
+    for xpath in xpaths:
+        try:
+            buttons = driver.find_elements(By.XPATH, xpath)
+        except Exception:
+            continue
+        for button in buttons:
+            try:
+                if not (button.is_displayed() and button.is_enabled()):
+                    continue
+            except Exception:
+                continue
+            try:
+                button.click()
+            except Exception:
+                try:
+                    driver.execute_script("arguments[0].click();", button)
+                except Exception:
+                    continue
+            print(f"[{log_name}] Password-expiry reminder dismissed (changing password later)")
+            print(f"[{log_name}] ⚠️ {notice}")
+            return notice
+    return ""
+
+
+def perform_login(driver, wait, username, password, log_name, secret_hint=""):
+    """Log in to HKPL with retries. Returns any library notice text ('' if none).
+
+    Handles two real-world quirks:
+    - Siteminder may re-present the login form (redirect chain or slow reply).
+    - When the account password is within ~14 days of expiry, HKPL shows a
+      "Reminder: Change Your Password" dialog after login which blocks the
+      flow until one of its buttons is clicked.
+    Also fails fast with a clear message when the site explicitly rejects the
+    credentials instead of retrying a doomed login.
     """
     last_url = ""
+    last_dialog_notice = ""
+    notice = ""
     for attempt in range(1, 4):
         try:
             print(f"[{log_name}] Step 1: Login page loaded (attempt {attempt})")
@@ -544,6 +634,10 @@ def perform_login(driver, wait, username, password, log_name):
             # Make sure the page (and any Siteminder redirect) has settled
             # before filling in the form.
             wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
+            if not is_login_url(driver.current_url):
+                # A previous attempt may already have established a session.
+                print(f"[{log_name}] Step 3: Login successful - current URL: {driver.current_url}")
+                return notice
 
             username_field = wait.until(EC.presence_of_element_located((By.NAME, "USER")))
             password_field = wait.until(EC.element_to_be_clickable((By.NAME, "PASSWORD")))
@@ -555,28 +649,54 @@ def perform_login(driver, wait, username, password, log_name):
             password_field.submit()
             print(f"[{log_name}] Step 2: Credentials submitted")
 
-            # Wait until we have left the login page. Give Siteminder time to
-            # finish its redirect chain; if the login form is re-presented,
-            # break out and retry the submission with a fresh page load.
+            # Wait for the login to complete. While waiting, dismiss the
+            # password-expiry reminder dialog and stop immediately when the
+            # site shows a login error (e.g. invalid username/password).
             time.sleep(3)
-            deadline = time.time() + 30
+            submit_time = time.time()
+            deadline = submit_time + 45
             while time.time() < deadline:
                 last_url = driver.current_url
                 if not is_login_url(last_url):
                     print(f"[{log_name}] Step 3: Login successful - current URL: {last_url}")
-                    return
-                if driver.find_elements(By.NAME, "USER"):
+                    if notice:
+                        print(f"[{log_name}] ⚠️ {notice}")
+                    return notice
+
+                error = get_login_error(driver)
+                if error:
+                    raise LoginRejectedError(
+                        f"the library site rejected the credentials ({error}). "
+                        f"Log in at https://www.hkpl.gov.hk/en/login.html to verify the "
+                        f"account and its current password, then update the "
+                        f"{secret_hint or 'LIB_USERNAME/LIB_PASSWORD'} GitHub secret(s)."
+                    )
+
+                dialog_notice = dismiss_password_expiry_dialog(driver, log_name)
+                if dialog_notice:
+                    notice = dialog_notice
+                    time.sleep(1)
+                    continue
+
+                # The login form is back and nothing is happening: retry the
+                # whole attempt with a fresh page load.
+                if time.time() - submit_time > 12:
+                    last_dialog_notice = get_password_notice(driver) or last_dialog_notice
                     print(f"[{log_name}] Login form re-presented, retrying submission")
                     break
+
                 time.sleep(1)
+        except LoginRejectedError:
+            raise
         except Exception as e:
             print(f"[{log_name}] Login attempt {attempt} failed: "
                   f"{type(e).__name__}: {str(e) or 'no additional details'}")
         time.sleep(2)
 
-    raise RuntimeError(
-        f"Login failed after 3 attempts - still on login page: {last_url}"
-    )
+    message = f"Login failed after 3 attempts - still on login page: {last_url}"
+    if last_dialog_notice:
+        message += f" | Library dialog: {last_dialog_notice}"
+    raise RuntimeError(message)
 
 
 def process_account(account):
@@ -595,8 +715,18 @@ def process_account(account):
     
     try:
         # Steps 1-3: Navigate to login page, submit credentials and wait for
-        # the login to complete (with retries for Siteminder redirects).
-        perform_login(driver, wait, username, password, log_name)
+        # the login to complete. Handles Siteminder redirects and the library's
+        # password-expiry reminder dialog; returns any notice displayed by the
+        # site (e.g. the password is due to expire).
+        login_notice = perform_login(
+            driver, wait, username, password, log_name, account.get("secret_hint", "")
+        )
+
+        # Some accounts also see the password-expiry reminder on the page that
+        # opens right after login; dismiss it so later steps are not blocked.
+        extra_notice = dismiss_password_expiry_dialog(driver, log_name)
+        if extra_notice and not login_notice:
+            login_notice = extra_notice
 
         # Step 4: Handle popup and overlay
         try:
@@ -823,14 +953,23 @@ def process_account(account):
         if renewal_error:
             email_body += f"\nRenewal action error: {renewal_error}\n"
         
+        if login_notice:
+            email_body += f"\n⚠️ Library notice: {login_notice}\n"
+            email_body += ("Please change the library password on the HKPL website before it "
+                           "expires and update the GitHub secret with the new password, "
+                           "otherwise automatic renewal will stop working.\n")
+
         send_email("Library Book Renewal Status", email_body, email_receiver)
         print(f"[{log_name}] Account processing completed successfully")
         return True
 
     except Exception as e:
-        print(f"\n[{log_name}] ❌ An error occurred: {type(e).__name__}: {str(e) or 'no additional details'}")
+        error_detail = f"{type(e).__name__}: {str(e) or 'no additional details'}"
+        print(f"\n[{log_name}] ❌ An error occurred: {error_detail}")
+        current_url = ""
         try:
-            print(f"[{log_name}] Current URL: {driver.current_url}")
+            current_url = driver.current_url
+            print(f"[{log_name}] Current URL: {current_url}")
             print(f"[{log_name}] Page title: {driver.title}")
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             with open(f"error_page_{log_name}_{timestamp}.html", "w", encoding="utf-8") as f:
@@ -839,6 +978,14 @@ def process_account(account):
             print(f"[{log_name}] Saved error_page_{log_name}_{timestamp}.html and error_screenshot_{log_name}_{timestamp}.png")
         except Exception as capture_err:
             print(f"[{log_name}] Could not capture error page details: {capture_err}")
+
+        send_email(
+            f"Library Book Renewal FAILED for {log_name}",
+            f"Automatic book renewal failed for account {log_name}.\n\n"
+            f"Error: {error_detail}\n"
+            + (f"\nCurrent URL: {current_url}\n" if current_url else ""),
+            email_receiver,
+        )
         return False
 
     finally:
